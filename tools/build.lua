@@ -3,7 +3,7 @@
 -- file. Dev tooling only; runs under plain Lua, never inside TTS.
 --
 --   lua tools/build.lua                 -> writes build/Global.lua
---   lua tools/build.lua <dir>           -> also copies it to <dir>/Global.lua
+--   lua tools/build.lua <dir>           -> also copies it to <dir>/Global.-1.lua
 --                                          (the VS Code TTS extension's folder)
 
 local function read(path)
@@ -44,7 +44,7 @@ print("wrote build/Global.lua (" .. #flat .. " bytes)")
 
 local dest = arg[1]
 if dest then
-  write(dest .. "/Global.lua", flat)
-  write(dest .. "/Global.xml", read("ui/Global.xml"))
-  print("copied Global.lua and Global.xml to " .. dest)
+  write(dest .. "/Global.-1.lua", flat)
+  write(dest .. "/Global.-1.xml", read("ui/Global.xml"))
+  print("copied Global.-1.lua and Global.-1.xml to " .. dest)
 end
