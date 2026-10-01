@@ -143,7 +143,7 @@ These are balanced in playtesting and can be toggled off for a pure game.
 |---|---|---|
 | M0 | Skeleton (git done; TTS push/pull = David) | Repo, VS Code push/pull working, empty mat loads |
 | M1 ✅ | Geometry core | `geom.lua` + `rules.lua` with green tests (intersections, arcs, captures, bounds) |
-| M2 (code done, needs TTS playtest) | Single rider loop | One colour can shift gear, commit moves, roll curves and see tiles spawn and snap. Uses grey-box tiles. |
+| M2 ✅ | Single rider loop | One colour can shift gear, commit moves, roll curves and see tiles spawn and snap. Uses grey-box tiles. |
 | M3 | Multiplayer rules | Turn order, crashes and respawn, Prizm capture/respawn, win screen, save/load |
 | M4 | UI pass | Rider panels, lobby settings (mode, player count, abilities on/off, Prizm target), chat log |
 | M5 | Hand mode | Drag-and-drop snapping and rejection |
