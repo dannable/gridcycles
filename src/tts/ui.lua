@@ -106,7 +106,9 @@ end
 -- Replace the on-table UI, then refresh once TTS has built it.
 function UI_.rebuild(colors)
   UI.setXml(UI_.buildXml(colors))
+  -- UI changes land a little after setXml; refresh twice in case the first is early
   Wait.time(function() UI_.refresh() end, 0.4)
+  Wait.time(function() UI_.refresh() end, 1.5)
 end
 
 ---------------------------------------------------------------- state -> UI

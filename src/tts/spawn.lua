@@ -10,6 +10,22 @@ Spawn = {}
 
 local VISUAL_TAG = "gc_visual"
 
+-- Objects get their tags in the spawn callback, which runs a little after
+-- spawnObject returns. Keep our own registry so clears also catch objects that
+-- are still spawning (or were destructed this frame).
+local live = {}   -- groupTag -> { obj... }
+
+local function register(obj, groupTag)
+  live[groupTag] = live[groupTag] or {}
+  table.insert(live[groupTag], obj)
+end
+
+local function destroy(o)
+  if o == nil then return end
+  if o.isDestroyed ~= nil and o.isDestroyed() then return end
+  o.destruct()
+end
+
 local function tint(c) return { r = c[1], g = c[2], b = c[3] } end
 
 local function place(params, color, groupTag)
@@ -29,19 +45,22 @@ local function place(params, color, groupTag)
       if params.name then o.setName(params.name) end
     end,
   })
+  register(obj, groupTag)
   return obj
 end
 
 function Spawn.clearGroup(groupTag)
-  for _, o in ipairs(getObjectsWithTag(groupTag)) do
-    o.destruct()
-  end
+  for _, o in ipairs(live[groupTag] or {}) do destroy(o) end
+  live[groupTag] = nil
+  for _, o in ipairs(getObjectsWithTag(groupTag)) do destroy(o) end
 end
 
 function Spawn.clearAll()
-  for _, o in ipairs(getObjectsWithTag(VISUAL_TAG)) do
-    o.destruct()
+  for tag, list in pairs(live) do
+    for _, o in ipairs(list) do destroy(o) end
+    live[tag] = nil
   end
+  for _, o in ipairs(getObjectsWithTag(VISUAL_TAG)) do destroy(o) end
 end
 
 -- Flat dark play surface covering Config.mat.
@@ -121,7 +140,6 @@ end
 -- always return to their slot; the script lays the real trail piece itself.
 
 local KINDS = { { "straight", "Straight" }, { "left", "Left" }, { "right", "Right" } }
-Spawn.home = {}   -- tile guid -> home position (not saved; trays are rebuilt on load)
 
 local function trayRowZ(index)
   return -(Config.mat.depth / 2 + Config.tts.trayOffset + (index - 1) * Config.tts.trayRowDepth)
@@ -142,6 +160,15 @@ function Spawn.parseTileName(name)
   return nil
 end
 
+-- Slot position of a tray tile, derived from its name so no object ids are needed.
+local function homePos(color, gear, kind, rowIndex)
+  local t = Config.tts
+  local kindIdx = 1
+  for i, k in ipairs(KINDS) do if k[1] == kind then kindIdx = i end end
+  local slot = (gear - Config.gears.min) * #KINDS + kindIdx
+  return { slotX(slot), t.tableY + t.matThickness + t.tileHeight / 2 + 0.05, trayRowZ(rowIndex) }
+end
+
 function Spawn.trayTiles(color, index)
   local t = Config.tts
   local z = trayRowZ(index)
@@ -155,10 +182,8 @@ function Spawn.trayTiles(color, index)
     for _, k in ipairs(KINDS) do
       slot = slot + 1
       local kind, label = k[1], k[2]
-      local x = slotX(slot)
-      local pos = { x, t.tableY + t.matThickness + t.tileHeight / 2 + 0.05, z }
-      local obj
-      obj = spawnObject({
+      local pos = homePos(color, g, kind, index)
+      local obj = spawnObject({
         type = t.blockType,
         position = pos,
         rotation = { 0, 0, 0 },
@@ -171,17 +196,21 @@ function Spawn.trayTiles(color, index)
           o.addTag(VISUAL_TAG)
           o.addTag("gc_tray_" .. color)
           o.addTag("gc_tile")
-          Spawn.home[o.guid] = pos
         end,
       })
+      register(obj, "gc_tray_" .. color)
     end
   end
 end
 
 -- Send a dragged tile back to its slot.
 function Spawn.returnTile(obj)
-  local pos = Spawn.home[obj.guid]
-  if pos == nil then return end
+  local color, gear, kind = Spawn.parseTileName(obj.getName())
+  if color == nil or State == nil then return end
+  local rowIndex
+  for i, c in ipairs(State.order) do if c == color then rowIndex = i end end
+  if rowIndex == nil then return end
+  local pos = homePos(color, gear, kind, rowIndex)
   obj.setRotation({ 0, 0, 0 })
   obj.setPositionSmooth(pos, false, true)
 end

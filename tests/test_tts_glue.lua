@@ -19,6 +19,7 @@ local function makeObj(params)
   function o.setPositionSmooth(p) o.pos = p; o.returned = (o.returned or 0) + 1 end
   function o.addTag(t) o.tags[t] = true end
   function o.destruct() o.dead = true end
+  function o.isDestroyed() return o.dead == true end
   live[#live + 1] = o
   if params.callback_function then params.callback_function(o) end
   return o
@@ -344,5 +345,23 @@ describe("Hand mode (stubbed)", function()
 
   it("non-tile objects are ignored", function()
     Events.handleDrop("Red", { getName = function() return "Dice" end, guid = "x" })
+  end)
+end)
+
+describe("Clearing while objects are still spawning (stubbed)", function()
+  it("clearAll catches objects whose tags are not applied yet", function()
+    local saved = spawnObject
+    spawnObject = function(params)   -- spawn without running the callback (still 'spawning')
+      local o = makeObj({ position = params.position })
+      return o
+    end
+    Spawn.mat()
+    spawnObject = saved
+    Spawn.clearAll()
+    local alive = 0
+    for _, o in ipairs(live) do
+      if not o.dead and o.params.callback_function == nil then alive = alive + 1 end
+    end
+    assert_eq(alive, 0)
   end)
 end)

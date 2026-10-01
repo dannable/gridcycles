@@ -44,12 +44,14 @@ end
 -- Mirror the current turn onto TTS's turn system (turn highlight).
 local function syncTurns()
   if State == nil then return end
+  local order = {}
+  for i, c in ipairs(State.order) do order[i] = c end   -- copy: don't hand TTS our live table
   Turns.enable = true
   Turns.type = 2                       -- custom order
-  Turns.order = State.order
-  Turns.turn_color = Rules.currentColor(State)
+  Turns.order = order
   Turns.skip_empty_hands = false
   Turns.pass_turns = false             -- we pass turns ourselves
+  Turns.turn_color = Rules.currentColor(State)
 end
 
 -- Push lobby settings into Config, the single source of tunables.
@@ -219,7 +221,7 @@ local DROP_MESSAGES = {
 function Events.handleDrop(playerColor, obj)
   if State == nil or obj == nil then return end
   local owner, gear, kind = Spawn.parseTileName(obj.getName())
-  if owner == nil or Spawn.home[obj.guid] == nil then return end   -- not one of our tiles
+  if owner == nil or State.riders[owner] == nil then return end   -- not one of our tiles
   if Config.placementMode ~= "hand" then Spawn.returnTile(obj) return end
   if playerColor ~= owner then
     printToColor("That's " .. owner .. "'s tile.", playerColor, rgb(owner))
