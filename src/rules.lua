@@ -235,3 +235,21 @@ function Rules.advanceTurn(state)
   if state.winner then return end
   state.turn = state.turn % #state.order + 1
 end
+
+-- True if `state` (e.g. decoded from a save) has the shape this version expects.
+-- Older or corrupt saves fail this and the game starts fresh.
+function Rules.isValidState(state)
+  if type(state) ~= "table" then return false end
+  if type(state.order) ~= "table" or #state.order == 0 then return false end
+  if type(state.turn) ~= "number" or state.order[state.turn] == nil then return false end
+  if type(state.riders) ~= "table" or type(state.prizms) ~= "table"
+    or type(state.markers) ~= "table" then return false end
+  for _, c in ipairs(state.order) do
+    local r = state.riders[c]
+    if type(r) ~= "table" or type(r.pose) ~= "table" or type(r.trail) ~= "table"
+      or type(r.trail.tiles) ~= "table" or type(r.trail.segs) ~= "table" then
+      return false
+    end
+  end
+  return true
+end

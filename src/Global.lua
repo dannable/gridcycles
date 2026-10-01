@@ -15,7 +15,7 @@ function onLoad(saved)
   if saved and saved ~= "" then
     State = JSON.decode(saved)
   end
-  if State ~= nil and State.order ~= nil then
+  if Rules.isValidState(State) then
     Events.restore()
   else
     State = nil
