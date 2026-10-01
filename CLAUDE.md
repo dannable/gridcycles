@@ -13,7 +13,7 @@ Tabletop Simulator mod: neon light-cycle racing, an original reskin inspired by 
 - Run tests (from repo root): `lua tests/run.lua`
   - Exit code 0 = all pass. Pending tests are listed but don't fail.
   - New test files must be added to `TEST_FILES` in `tests/run.lua`.
-- No build step. The VS Code TTS extension inlines `#include` files from `src/` when pushing to the game.
+- Build step for TTS: `lua tools/build.lua "<TTS extension folder>"` flattens `#include`s in src/Global.lua into one Global.lua (+ copies ui/Global.xml) into the VS Code TTS extension folder (`%TEMP%TabletopSimulatorTabletop Simulator Lua`), then Save and Play. The extension (v1.1.3) only understands `require`, not `#include`, so do not rely on it to inline.
 
 ## Hard constraints
 

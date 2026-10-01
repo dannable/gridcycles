@@ -1,6 +1,6 @@
 -- Global.lua
--- TTS Global script entry point. The VS Code TTS extension inlines #include files
--- (search path: src/, see .vscode/settings.json). Load order matters.
+-- TTS Global script entry point. tools/build.lua flattens the #include lines below
+-- into one file for TTS (search path: src/). Load order matters.
 
 #include config
 #include geom

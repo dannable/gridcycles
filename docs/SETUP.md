@@ -39,3 +39,11 @@ When the table layout changes, save the game in TTS and copy the save JSON from
 ## 5. Blender (M6)
 
 Model sources go in `assets/blender/`. Export OBJ to `assets/models/` and textures to `assets/textures/`.
+
+## Pushing to TTS (what actually works)
+
+The VS Code extension (v1.1.3) does not expand `#include`. Instead:
+
+1. In TTS load a game, then in VS Code run **TTS Lua: Get Lua Scripts** once.
+2. From the repo root: `lua tools/build.lua "C:/Users/<you>/AppData/Local/Temp/TabletopSimulator/Tabletop Simulator Lua"`
+3. In VS Code run **TTS Lua: Save and Play**. Repeat steps 2-3 after each code change.
