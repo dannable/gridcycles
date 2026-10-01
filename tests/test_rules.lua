@@ -237,3 +237,25 @@ describe("Rules simulation", function()
     end
   end)
 end)
+
+describe("Rules aliasing and multi-capture", function()
+  it("result tables are not aliased to state", function()
+    local st = newState()
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    r.exitPose.heading = 99
+    r.segs[1].a.x = 99
+    assert_near(st.riders.Red.pose.heading, 0)
+    assert_near(st.riders.Red.trail.segs[1].a.x, 0)
+  end)
+  it("one tile can capture two Prizms", function()
+    local st = newState({
+      { id = 1, a = { x = -1, z = -9.5 }, b = { x = 1, z = -9.5 } },
+      { id = 2, a = { x = -1, z = -8.5 }, b = { x = 1, z = -8.5 } },
+    })
+    st.riders.Red.gear = 3
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, function(n) return math.random(n) end)
+    assert_eq(#r.captured, 2)
+    assert_eq(st.riders.Red.prizms, 2)
+    assert_eq(#st.markers, 2)
+  end)
+end)

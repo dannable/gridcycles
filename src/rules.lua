@@ -172,15 +172,17 @@ function Rules.resolveMove(state, color, move, rollFn)
     result.outcome = "crash"
     result.crashReason = crashReason
     result.gear = rider.gear
-    result.respawn = rider.pose
+    result.respawn = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading }
     return result
   end
 
   -- 5. place tile
   local entry = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading }
-  for _, s in ipairs(segs) do rider.trail.segs[#rider.trail.segs + 1] = s end
+  for _, s in ipairs(segs) do
+    rider.trail.segs[#rider.trail.segs + 1] = { a = { x = s.a.x, z = s.a.z }, b = { x = s.b.x, z = s.b.z } }
+  end
   rider.trail.tiles[#rider.trail.tiles + 1] = { kind = kind, gear = gear, entry = entry }
-  rider.pose = exitPose
+  rider.pose = { x = exitPose.x, z = exitPose.z, heading = exitPose.heading }
   rider.gear = spunOut and Config.gears.min or gear
   result.gear = rider.gear
   result.outcome = "placed"
