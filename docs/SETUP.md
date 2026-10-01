@@ -47,3 +47,9 @@ The VS Code extension (v1.1.3) does not expand `#include`. Instead:
 1. In TTS load a game, then in VS Code run **TTS Lua: Get Lua Scripts** once.
 2. From the repo root: `lua tools/build.lua "C:/Users/<you>/AppData/Local/Temp/TabletopSimulator/Tabletop Simulator Lua"`
 3. In VS Code run **TTS Lua: Save and Play**. Repeat steps 2-3 after each code change.
+
+## Bike model (M6)
+
+Raw Meshy exports live in `assets/source/` (git-ignored; the first export was 2.3M faces, so use Meshy's low-poly setting).
+`py -3.13 tools/prep_bike.py [+1|-1]` reorients the OBJ (nose +z, y up, origin bottom centre, length 1.0), lifts the greyscale texture, and writes `assets/models/bike.obj|mtl|png`. Needs `pip install numpy pillow`.
+TTS loads meshes by URL: upload `bike.obj` and `bike.png` somewhere public, then fill `Config.tts.riderModel.mesh` / `.diffuse`. If the bike faces backwards set `riderModel.yaw = 180`; adjust `scale` / `yOffset` to taste.

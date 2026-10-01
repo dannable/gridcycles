@@ -26,6 +26,14 @@ local function makeObj(params)
 end
 
 function spawnObject(params) return makeObj(params) end
+local dataSpawns = {}
+function spawnObjectData(params)
+  dataSpawns[#dataSpawns + 1] = params.data
+  local o = makeObj({ position = { params.data.Transform.posX, params.data.Transform.posY, params.data.Transform.posZ } })
+  for _, tg in ipairs(params.data.Tags or {}) do o.addTag(tg) end
+  if params.callback_function then params.callback_function(o) end
+  return o
+end
 function getObjectsWithTag(tag)
   local out = {}
   for _, o in ipairs(live) do
@@ -363,5 +371,25 @@ describe("Clearing while objects are still spawning (stubbed)", function()
       if not o.dead and o.params.callback_function == nil then alive = alive + 1 end
     end
     assert_eq(alive, 0)
+  end)
+end)
+
+describe("Custom rider mesh (stubbed)", function()
+  it("spawns a Custom_Model with colour, heading, yaw and scale when a mesh is set", function()
+    Events.toLobby()
+    local m = Config.tts.riderModel
+    m.mesh, m.diffuse, m.yaw, m.scale = "http://x/bike.obj", "http://x/bike.png", 180, 2
+    Spawn.rider("Red", { x = 3, z = 4, heading = 90 })
+    local d = dataSpawns[#dataSpawns]
+    assert_eq(d.Name, "Custom_Model")
+    assert_eq(d.CustomMesh.MeshURL, "http://x/bike.obj")
+    assert_eq(d.CustomMesh.ColliderURL, "http://x/bike.obj")
+    assert_eq(d.Transform.rotY, 270)
+    assert_eq(d.Transform.scaleX, 2)
+    assert_near(d.ColorDiffuse.r, Config.palette.Red[1])
+    assert_eq(count("gc_rider_Red"), 1)
+    Spawn.rider("Red", { x = 3, z = 4, heading = 0 })
+    assert_eq(count("gc_rider_Red"), 1, "old rider replaced")
+    m.mesh, m.diffuse, m.yaw, m.scale = "", "", 0, 1.8
   end)
 end)

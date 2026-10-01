@@ -118,9 +118,46 @@ function Spawn.marker(owner, index, seg)
 end
 
 -- Rider mini sits at the trail end, pointing along the heading.
+-- Custom bike mesh, spawned from a data table so tint/lock/tags are set up front
+-- (setCustomObject would respawn the object and drop them).
+local function customRider(color, pose)
+  local t = Config.tts
+  local m = t.riderModel
+  local group = "gc_rider_" .. color
+  local c = Config.palette[color]
+  local obj = spawnObjectData({
+    data = {
+      Name = "Custom_Model",
+      Nickname = color .. " rider",
+      Transform = {
+        posX = pose.x, posY = t.tableY + t.matThickness + m.yOffset, posZ = pose.z,
+        rotX = 0, rotY = pose.heading + m.yaw, rotZ = 0,
+        scaleX = m.scale, scaleY = m.scale, scaleZ = m.scale,
+      },
+      ColorDiffuse = { r = c[1], g = c[2], b = c[3] },
+      Locked = true,
+      Tags = { VISUAL_TAG, group },
+      CustomMesh = {
+        MeshURL = m.mesh,
+        DiffuseURL = m.diffuse,
+        ColliderURL = (m.collider ~= "" and m.collider) or m.mesh,
+        Convex = true,
+        MaterialIndex = 0,
+        TypeIndex = 0,
+      },
+    },
+    callback_function = function(o) o.interactable = false end,
+  })
+  register(obj, group)
+end
+
 function Spawn.rider(color, pose)
   local t = Config.tts
   Spawn.clearGroup("gc_rider_" .. color)
+  if t.riderModel and t.riderModel.mesh ~= "" then
+    customRider(color, pose)
+    return
+  end
   place({
     type = t.riderType,
     position = { pose.x, t.tableY + t.matThickness + t.riderSize / 2, pose.z },

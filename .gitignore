@@ -17,3 +17,6 @@ desktop.ini
 # Build output
 dist/
 build/
+
+# Huge raw AI-generated sources (keep out of git; decimated models go in assets/models)
+assets/source/

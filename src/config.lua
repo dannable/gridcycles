@@ -53,6 +53,18 @@ Config = {
     trayGap = 2.4,           -- spacing between tray slots (x)
     trayRowDepth = 8,        -- spacing between riders' tray rows (z)
     trayOffset = 6,          -- first tray row sits this far beyond the mat's south edge
+    -- Custom rider mesh (assets/models/bike.obj + bike.png, uploaded somewhere public).
+    -- Leave mesh empty to keep the grey-box triangle. The model is 1.0 long, nose +z,
+    -- origin at bottom centre; `scale` is the in-game length. Diffuse should be
+    -- greyscale: it is multiplied by the rider's neon colour.
+    riderModel = {
+      mesh = "",
+      diffuse = "",
+      collider = "",         -- optional; defaults to the mesh
+      scale = 1.8,
+      yaw = 0,               -- extra degrees if the bike points the wrong way (try 180)
+      yOffset = 0,
+    },
     blockType = "BlockSquare",
     riderType = "BlockTriangle",
   },
