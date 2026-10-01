@@ -1,0 +1,18 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Blender backups
+*.blend1
+*.blend2
+
+# Local Claude Code overrides
+.claude/settings.local.json
+
+# Build output
+dist/

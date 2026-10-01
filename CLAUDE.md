@@ -1,0 +1,55 @@
+# Gridcycles (TTS mod)
+
+Tabletop Simulator mod: neon light-cycle racing, an original reskin inspired by Lazer Ryderz.
+**PLAN.md is the source of truth** for rules, architecture and milestones. Read it before starting work.
+
+## Current status
+
+- Scaffold only. Next milestone: **M0** (git init + first commit), then **M1** (geometry + rules core).
+- Track milestone progress by ticking the table in PLAN.md section 7 as milestones complete.
+
+## Commands
+
+- Run tests (from repo root): `lua tests/run.lua`
+  - Exit code 0 = all pass. Pending tests are listed but don't fail.
+  - New test files must be added to `TEST_FILES` in `tests/run.lua`.
+- No build step. The VS Code TTS extension inlines `#include` files from `src/` when pushing to the game.
+
+## Hard constraints
+
+- **Lua 5.2 only (TTS uses MoonSharp).** No `//` integer division, no bitwise operators (`&`, `|`, `~`, `<<`), no `utf8` library, no `goto` reliance, no `require`. Tests may run on a newer local Lua, so the runner won't catch these; check by eye.
+- **No `require` / no `return` at module top level.** `#include` pastes files inline into Global.lua, so each module defines one global table (`Config`, `Geom`, `Rules`, `Spawn`, `Events`, `UI_`) and returns nothing.
+- **`src/geom.lua` and `src/rules.lua` are pure.** No TTS API calls (`spawnObject`, `getObjectFromGUID`, `Player`, `JSON`, `Wait`, `UI`, etc.). All TTS calls go in `src/tts/`. This keeps the core testable outside the game.
+- **Never use TTS physics/colliders for game logic.** Collisions, bounds and captures are computed from stored 2D paths (x, z) in `Geom`.
+- **All tunables live in `src/config.lua`.** Don't hard-code tile lengths, gears, thresholds or counts elsewhere.
+- **Inject randomness.** Rules functions take a `rollFn` so tests are deterministic.
+- `UI` is a reserved TTS global; our helper table is `UI_`.
+- **Original IP only.** Don't use "Lazer Ryderz", its rider names, art or rules text in any shipped file, UI string or asset. The game is named "Gridcycles".
+
+## Conventions
+
+- 2-space indent, LF line endings (see .editorconfig / .gitattributes).
+- Coordinates: table plane is (x, z), y is up. `Pose.heading` is in degrees, 0 = +z. Write down the turn-direction convention in geom.lua once you implement it, and test it.
+- Write tests first for anything in `Geom` / `Rules`. Replace `pending_it(...)` stubs in tests/ with real `it(...)` cases.
+- Small commits, one milestone step each, with a message that names the milestone (e.g. `M1: segment intersection`).
+
+## Layout
+
+```
+PLAN.md            design + milestones (source of truth)
+src/Global.lua     TTS entry; #includes everything
+src/config.lua     tunables
+src/geom.lua       pure 2D geometry        (M1)
+src/rules.lua      pure turn resolution    (M1)
+src/tts/           TTS API glue: spawn, ui, events (M2+)
+src/riders/        rider ability hooks     (M7)
+ui/Global.xml      TTS XML UI              (M4)
+tests/             zero-dependency runner + specs
+assets/            models, textures, .blend sources (M6)
+save/              exported TTS save JSON for the table
+docs/SETUP.md      toolchain setup (Windows)
+```
+
+## Things only David can do
+
+These need the running game on his PC: pushing scripts into TTS, playtesting, exporting the save to `save/`, uploading assets to Steam Cloud, publishing to the Workshop. When a task needs one of these, stop and say what to do instead of guessing.

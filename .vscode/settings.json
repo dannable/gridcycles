@@ -1,0 +1,4 @@
+{
+  "TTSLua.includeOtherFilesPaths": ["${workspaceFolder}/src"],
+  "files.eol": "\n"
+}
