@@ -5,7 +5,7 @@ Tabletop Simulator mod: neon light-cycle racing, an original reskin inspired by 
 
 ## Current status
 
-- **M0 (git) and M1 (geometry + rules, 62 green tests) done.** Next: **M2** single rider loop (src/tts/*, needs David to push into TTS and test). Lua 5.4 installed via winget for tests.
+- **M0 (git), M1 (geometry + rules) done; M2 code written, awaiting David's in-game test.** Neon palette chosen. Next after M2 sign-off: M3 (turns, multiplayer, save/load, win screen).
 - Track milestone progress by ticking the table in PLAN.md section 7 as milestones complete.
 
 ## Commands

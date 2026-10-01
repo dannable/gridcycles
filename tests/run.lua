@@ -9,6 +9,7 @@ local TEST_FILES = {
   "tests/test_smoke.lua",
   "tests/test_geom.lua",
   "tests/test_rules.lua",
+  "tests/test_tts_glue.lua",
 }
 
 -- Load source modules (they define globals: Config, Geom, Rules)

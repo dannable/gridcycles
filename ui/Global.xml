@@ -1,2 +1,18 @@
-<!-- Global UI. Rider panels and lobby land here in PLAN.md M4. -->
-<Panel id="root" active="false" />
+<!-- Global UI. M2: minimal commit-mode panel. Full rider panels and lobby in M4. -->
+<Panel id="root" active="true" width="420" height="190" rectAlignment="LowerCenter"
+       offsetXY="0 20" color="#0A0618E6" padding="10 10 10 10">
+  <VerticalLayout spacing="8">
+    <Text id="gcStatus" fontSize="18" color="#05D9E8" alignment="MiddleCenter">Gridcycles</Text>
+    <HorizontalLayout spacing="8">
+      <Button onClick="gcShiftDown" color="#2A1B5C" textColor="#FFFFFF">Shift down</Button>
+      <Button onClick="gcShiftHold" color="#2A1B5C" textColor="#FFFFFF">Hold</Button>
+      <Button onClick="gcShiftUp" color="#2A1B5C" textColor="#FFFFFF">Shift up</Button>
+    </HorizontalLayout>
+    <HorizontalLayout spacing="8">
+      <Button onClick="gcLeft" color="#FF2A6D" textColor="#000000">Curve L</Button>
+      <Button onClick="gcStraight" color="#39FF14" textColor="#000000">Straight</Button>
+      <Button onClick="gcRight" color="#FF2A6D" textColor="#000000">Curve R</Button>
+    </HorizontalLayout>
+    <Button onClick="gcNewGame" color="#444444" textColor="#FFFFFF" preferredHeight="28">New game</Button>
+  </VerticalLayout>
+</Panel>

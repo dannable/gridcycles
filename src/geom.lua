@@ -154,3 +154,17 @@ function Geom.inBounds(segs, mat)
   end
   return true
 end
+
+local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+
+-- Midpoint, length and heading (degrees, 0 = +z, same convention as Pose) of a
+-- segment. Used by TTS glue to lay a thin block along it.
+function Geom.segmentPose(seg)
+  local dx, dz = seg.b.x - seg.a.x, seg.b.z - seg.a.z
+  return {
+    x = (seg.a.x + seg.b.x) / 2,
+    z = (seg.a.z + seg.b.z) / 2,
+    length = math.sqrt(dx * dx + dz * dz),
+    heading = (atan2(dx, dz) / RAD) % 360,
+  }
+end

@@ -36,6 +36,31 @@ Config = {
   prizmEdgeMargin = 3,      -- keep Prizm centres this far from the mat edge
   spawnTries = 50,          -- retries when a random spawn lands on something
 
+  -- TTS presentation (grey-box M2). Sizes are in TTS units; BlockSquare is
+  -- assumed to be 1x1x1 at scale 1. Verify in game and adjust.
+  tts = {
+    tableY = 1.0,           -- table surface height
+    trailWidth = 0.35,
+    trailHeight = 0.12,
+    prizmWidth = 0.3,
+    prizmHeight = 0.6,
+    markerSize = 0.8,
+    riderSize = 0.9,
+    matThickness = 0.1,
+    matColor = { 0.03, 0.02, 0.08 },
+    blockType = "BlockSquare",
+    riderType = "BlockTriangle",
+  },
+
+  -- Neon palette per rider colour (r, g, b in 0..1)
+  palette = {
+    Red    = { 1.00, 0.16, 0.43 },   -- hot magenta
+    Blue   = { 0.02, 0.85, 0.91 },   -- electric cyan
+    Green  = { 0.22, 1.00, 0.08 },   -- acid green
+    Yellow = { 1.00, 0.90, 0.00 },   -- laser yellow
+  },
+  prizmColor = { 0.85, 0.75, 1.00 },
+
   placementMode = "commit", -- "commit" | "hand"
   snapRadius = 1.0,         -- hand mode only
   abilitiesEnabled = true,
