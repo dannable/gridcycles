@@ -7,7 +7,19 @@
 
 Events = {
   pendingShift = 0,     -- -1 / 0 / +1 for the current rider; reset every turn
+  settings = {          -- lobby settings; copied into State.settings when a game starts
+    maxPlayers = Config.maxPlayers,
+    prizmsToWin = Config.prizmsToWin,
+    abilities = Config.abilitiesEnabled,
+    mode = Config.placementMode,
+  },
 }
+
+-- Announce to everyone: chat plus the on-table event log.
+local function say(msg, color)
+  broadcastToAll(msg, color or { 1, 1, 1 })
+  UI_.log(msg)
+end
 
 local function rollFn(n) return math.random(n) end
 
@@ -40,35 +52,88 @@ local function syncTurns()
   Turns.pass_turns = false             -- we pass turns ourselves
 end
 
+-- Push lobby settings into Config, the single source of tunables.
+local function applySettings(s)
+  Config.maxPlayers = s.maxPlayers
+  Config.prizmsToWin = s.prizmsToWin
+  Config.abilitiesEnabled = s.abilities
+  Config.placementMode = s.mode
+end
+
+-- Back to the lobby: no game, empty mat, settings panel up.
+function Events.toLobby()
+  State = nil
+  Events.pendingShift = 0
+  UI_.clearLog()
+  Spawn.clearAll()
+  Spawn.mat()
+  UI_.rebuild({})
+end
+
 -- colors: optional override (tests); defaults to the seated players.
 function Events.newGame(colors)
   Events.pendingShift = 0
+  applySettings(Events.settings)
   colors = colors or seatedColors()
   if #colors == 0 then colors = { "Red" } end   -- nobody seated: solo Red sandbox
   State = Rules.newState(colors, rollFn)
+  State.settings = {
+    maxPlayers = Events.settings.maxPlayers, prizmsToWin = Events.settings.prizmsToWin,
+    abilities = Events.settings.abilities, mode = Events.settings.mode,
+  }
+  UI_.clearLog()
   Spawn.rebuild(State)
   syncTurns()
+  UI_.rebuild(State.order)
+  say("New game: " .. table.concat(colors, ", ") .. ". First to " .. Config.prizmsToWin
+    .. " Prizms wins. " .. colors[1] .. " goes first.", rgb(colors[1]))
+end
+
+-- Lobby button presses. Settings are host-only.
+function Events.lobbyClick(player, action)
+  if not player.host then
+    printToColor("Only the host can change lobby settings.", player.color, { 1, 1, 1 })
+    return
+  end
+  local s = Events.settings
+  if action == "players_dec" then s.maxPlayers = math.max(1, s.maxPlayers - 1)
+  elseif action == "players_inc" then s.maxPlayers = math.min(4, s.maxPlayers + 1)
+  elseif action == "prizms_dec" then s.prizmsToWin = math.max(1, s.prizmsToWin - 1)
+  elseif action == "prizms_inc" then s.prizmsToWin = math.min(6, s.prizmsToWin + 1)
+  elseif action == "abilities" then s.abilities = not s.abilities
+  elseif action == "mode" then
+    broadcastToAll("Hand mode isn't available yet (planned for a later update). Staying on Commit.",
+      { 1, 1, 1 })
+  elseif action == "start" then
+    if State == nil then Events.newGame() end
+    return
+  elseif action == "menu" then
+    Events.toLobby()
+    return
+  end
   UI_.refresh()
-  broadcastToAll("New game: " .. table.concat(colors, ", ") .. ". " .. colors[1] .. " goes first.",
-    rgb(colors[1]))
 end
 
 -- After load: rebuild visuals from saved state.
 function Events.restore()
   Events.pendingShift = 0
+  if type(State.settings) == "table" then
+    Events.settings = State.settings
+  end
+  applySettings(Events.settings)
   Spawn.rebuild(State)
   syncTurns()
-  UI_.refresh()
+  UI_.rebuild(State.order)
 end
 
 -- Is `playerColor` allowed to act now? Tells them why if not.
 local function mayAct(playerColor)
   if State == nil then
-    broadcastToAll("No game running. Press New game.", { 1, 1, 1 })
+    broadcastToAll("No game running. The host starts one from the lobby.", { 1, 1, 1 })
     return false
   end
   if State.winner then
-    printToColor("The game is over. Press New game.", playerColor, { 1, 1, 1 })
+    printToColor("The game is over. The host can go back to the lobby.", playerColor, { 1, 1, 1 })
     return false
   end
   local cur = Rules.currentColor(State)
@@ -128,15 +193,15 @@ function Events.commitMove(playerColor, kind)
   Events.pendingShift = 0
   local r = Rules.resolveMove(State, color, move, rollFn)
   apply(color, r)
-  broadcastToAll(describe(color, move, r), rgb(color))
+  say(describe(color, move, r), rgb(color))
   if r.outcome == "win" then
-    broadcastToAll("=== " .. string.upper(color) .. " WINS with "
-      .. State.riders[color].prizms .. " Prizms! Press New game to race again. ===", rgb(color))
+    say("=== " .. string.upper(color) .. " WINS with "
+      .. State.riders[color].prizms .. " Prizms! Host: Back to lobby to race again. ===", rgb(color))
   else
     Rules.advanceTurn(State)
     local nxt = Rules.currentColor(State)
     if nxt ~= color then
-      broadcastToAll(nxt .. "'s turn.", rgb(nxt))
+      say(nxt .. "'s turn.", rgb(nxt))
     end
   end
   syncTurns()

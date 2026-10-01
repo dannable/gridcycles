@@ -18,11 +18,8 @@ function onLoad(saved)
   if Rules.isValidState(State) then
     Events.restore()
   else
-    State = nil
-    Events.newGame()   -- M2: start a single-rider game immediately
+    Events.toLobby()   -- fresh table or stale save: show the lobby
   end
-  -- the XML UI may not be ready on the first frame
-  Wait.time(function() UI_.refresh() end, 0.5)
   print("Gridcycles loaded")
 end
 

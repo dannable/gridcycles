@@ -26,7 +26,12 @@ function getObjectsWithTag(tag)
   end
   return out
 end
-UI = { setValue = function(id, v) uiText[id] = v end }
+local attrs = {}
+UI = {
+  setValue = function(id, v) uiText[id] = v end,
+  setAttribute = function(id, k, v) attrs[id .. "." .. k] = v end,
+  setXml = function(x) uiText.xml = x end,
+}
 function broadcastToAll(msg) broadcasts[#broadcasts + 1] = msg end
 function printToColor(msg, color) private[#private + 1] = { color = color, msg = msg } end
 Wait = { time = function(f) f() end }
@@ -160,5 +165,95 @@ describe("TTS glue, multiplayer (stubbed)", function()
     assert_eq(#State.riders.Blue.trail.tiles, tiles)
     Events.newGame()
     assert_false(State.winner)
+  end)
+end)
+
+describe("Lobby and UI (stubbed)", function()
+  local host = { color = "Red", host = true }
+  local guest = { color = "Blue", host = false }
+
+  it("toLobby clears the game and shows the lobby", function()
+    Events.toLobby()
+    assert_eq(State, nil)
+    assert_eq(attrs["gcLobby.active"], "true")
+    assert_eq(attrs["gcStatusPanel.active"], "false")
+  end)
+
+  it("lobby settings change only for the host and clamp", function()
+    local before = Events.settings.maxPlayers
+    Events.lobbyClick(guest, "players_inc")
+    assert_eq(Events.settings.maxPlayers, before)
+    Events.settings.maxPlayers = 4
+    Events.lobbyClick(host, "players_inc")
+    assert_eq(Events.settings.maxPlayers, 4)
+    Events.lobbyClick(host, "players_dec")
+    assert_eq(Events.settings.maxPlayers, 3)
+    Events.settings.prizmsToWin = 6
+    Events.lobbyClick(host, "prizms_inc")
+    assert_eq(Events.settings.prizmsToWin, 6)
+    Events.lobbyClick(host, "abilities")
+    assert_false(Events.settings.abilities)
+    Events.lobbyClick(host, "abilities")
+  end)
+
+  it("start applies settings to Config and builds rider panels", function()
+    seated = { "Red", "Blue" }
+    Events.settings.prizmsToWin = 5
+    Events.settings.maxPlayers = 2
+    Events.lobbyClick(host, "start")
+    assert_eq(Config.prizmsToWin, 5)
+    assert_eq(Config.maxPlayers, 2)
+    assert_eq(State.settings.prizmsToWin, 5)
+    assert_true(uiText.xml:find('id="gcPanel_Red"', 1, true) ~= nil)
+    assert_true(uiText.xml:find('id="gcPanel_Blue"', 1, true) ~= nil)
+    assert_true(uiText.xml:find('visibility="Blue"', 1, true) ~= nil)
+    assert_eq(attrs["gcLobby.active"], "false")
+    assert_eq(attrs["gcPanel_Red.active"], "true")
+  end)
+
+  it("only the current rider's buttons are interactable", function()
+    assert_eq(attrs["gcb_Red_straight.interactable"], "true")
+    assert_eq(attrs["gcb_Blue_straight.interactable"], "false")
+  end)
+
+  it("button ids route to moves for the clicking player", function()
+    UI_.handle({ color = "Red" }, "gcb_Red_shiftup")
+    assert_eq(Events.pendingShift, 1)
+    assert_eq(attrs["gcb_Red_shiftup.color"], "#05D9E8")
+    UI_.handle({ color = "Red" }, "gcb_Red_straight")
+    assert_eq(Rules.currentColor(State), "Blue")
+    assert_eq(State.riders.Red.gear, 2)
+  end)
+
+  it("a player cannot press another rider's button", function()
+    local tiles = #State.riders.Red.trail.tiles
+    UI_.handle({ color = "Blue" }, "gcb_Red_straight")
+    assert_eq(#State.riders.Red.trail.tiles, tiles)
+  end)
+
+  it("event log keeps only the latest lines and shows odds", function()
+    for i = 1, 20 do UI_.log("line " .. i) end
+    UI_.refresh()
+    assert_true(uiText.gcLog:find("line 20", 1, true) ~= nil)
+    assert_true(uiText.gcLog:find("line 1\n", 1, true) == nil)
+    assert_true(uiText.gcOdds_Blue:find("Curve success", 1, true) ~= nil)
+  end)
+
+  it("generated XML is balanced", function()
+    local xml = UI_.buildXml({ "Red", "Blue", "Green" })
+    local opens, closes, selfc = 0, 0, 0
+    for tag in xml:gmatch("<(/?)[%a]+[^>]*>") do
+      if tag == "/" then closes = closes + 1 else opens = opens + 1 end
+    end
+    for _ in xml:gmatch("/>") do selfc = selfc + 1 end
+    assert_eq(opens - selfc, closes)
+  end)
+
+  it("restore adopts the saved settings", function()
+    State = deepcopy(State)
+    State.settings.prizmsToWin = 4
+    Events.restore()
+    assert_eq(Config.prizmsToWin, 4)
+    assert_eq(Events.settings.prizmsToWin, 4)
   end)
 end)

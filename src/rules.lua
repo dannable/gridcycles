@@ -253,3 +253,21 @@ function Rules.isValidState(state)
   end
   return true
 end
+
+-- Gear the rider will be in after applying `shift` (clamped like resolveMove).
+function Rules.gearAfterShift(gear, shift)
+  local s = clamp(shift or 0, -Config.gears.maxShift, Config.gears.maxShift)
+  return clamp(gear + s, Config.gears.min, Config.gears.max)
+end
+
+-- Chance (0..1) that a curve attempted at `gear` succeeds, and the chance of a
+-- spin-out (which also curves, but drops the rider to gear 1).
+function Rules.curveOdds(gear)
+  local die = Config.turnCheck.die
+  local ok = math.max(0, math.min(die, die - gear + 1)) / die
+  local spin = 0
+  if gear >= Config.turnCheck.spinOutMinGear and Config.turnCheck.spinOutRoll < gear then
+    spin = 1 / die
+  end
+  return ok, spin
+end
