@@ -102,8 +102,7 @@ function Events.lobbyClick(player, action)
   elseif action == "prizms_inc" then s.prizmsToWin = math.min(6, s.prizmsToWin + 1)
   elseif action == "abilities" then s.abilities = not s.abilities
   elseif action == "mode" then
-    broadcastToAll("Hand mode isn't available yet (planned for a later update). Staying on Commit.",
-      { 1, 1, 1 })
+    s.mode = (s.mode == "hand") and "commit" or "hand"
   elseif action == "start" then
     if State == nil then Events.newGame() end
     return
@@ -206,4 +205,38 @@ function Events.commitMove(playerColor, kind)
   end
   syncTurns()
   UI_.refresh()
+end
+
+-- Hand mode: a tile was dropped. Whatever happens, it goes back to its tray slot;
+-- if the drop was legal, the move is committed through the normal pipeline.
+local DROP_MESSAGES = {
+  turn = "It isn't your turn.",
+  over = "The game is over.",
+  gear = "That tile is more than %d gear(s) from your current gear (G%d).",
+  far  = "Drop the tile closer to where your trail ends.",
+}
+
+function Events.handleDrop(playerColor, obj)
+  if State == nil or obj == nil then return end
+  local owner, gear, kind = Spawn.parseTileName(obj.getName())
+  if owner == nil or Spawn.home[obj.guid] == nil then return end   -- not one of our tiles
+  if Config.placementMode ~= "hand" then Spawn.returnTile(obj) return end
+  if playerColor ~= owner then
+    printToColor("That's " .. owner .. "'s tile.", playerColor, rgb(owner))
+    Spawn.returnTile(obj)
+    return
+  end
+  local p = obj.getPosition()
+  local ok, v = Rules.validateTileDrop(State, owner, gear, kind, { x = p.x, z = p.z })
+  Spawn.returnTile(obj)
+  if not ok then
+    local msg = DROP_MESSAGES[v]
+    if v == "gear" then
+      msg = string.format(msg, Config.gears.maxShift, State.riders[owner].gear)
+    end
+    printToColor(msg, playerColor, { 1, 1, 1 })
+    return
+  end
+  Events.pendingShift = v
+  Events.commitMove(owner, kind)
 end

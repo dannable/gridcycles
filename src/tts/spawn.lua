@@ -115,6 +115,77 @@ function Spawn.clearTrail(color)
   Spawn.clearGroup("gc_trail_" .. color)
 end
 
+-- Hand mode ---------------------------------------------------------------
+-- Each rider gets a tray: one locked slab plus 15 draggable tiles
+-- (5 gears x straight/left/right). Tiles are named "<Color> G<gear> <Kind>" and
+-- always return to their slot; the script lays the real trail piece itself.
+
+local KINDS = { { "straight", "Straight" }, { "left", "Left" }, { "right", "Right" } }
+Spawn.home = {}   -- tile guid -> home position (not saved; trays are rebuilt on load)
+
+local function trayRowZ(index)
+  return -(Config.mat.depth / 2 + Config.tts.trayOffset + (index - 1) * Config.tts.trayRowDepth)
+end
+
+local function slotX(slot)
+  local total = (Config.gears.max - Config.gears.min + 1) * #KINDS
+  return (slot - (total + 1) / 2) * Config.tts.trayGap
+end
+
+-- "Red G3 Left" -> "Red", 3, "left"
+function Spawn.parseTileName(name)
+  local color, gear, kindName = tostring(name):match("^(%a+) G(%d) (%a+)$")
+  if not color then return nil end
+  for _, k in ipairs(KINDS) do
+    if k[2] == kindName then return color, tonumber(gear), k[1] end
+  end
+  return nil
+end
+
+function Spawn.trayTiles(color, index)
+  local t = Config.tts
+  local z = trayRowZ(index)
+  place({
+    position = { 0, t.tableY + t.matThickness / 2 - 0.05, z },
+    scale = { Config.mat.width, t.matThickness, t.trayRowDepth - 1 },
+    name = color .. " tray",
+  }, t.matColor, "gc_tray_" .. color)
+  local slot = 0
+  for g = Config.gears.min, Config.gears.max do
+    for _, k in ipairs(KINDS) do
+      slot = slot + 1
+      local kind, label = k[1], k[2]
+      local x = slotX(slot)
+      local pos = { x, t.tableY + t.matThickness + t.tileHeight / 2 + 0.05, z }
+      local obj
+      obj = spawnObject({
+        type = t.blockType,
+        position = pos,
+        rotation = { 0, 0, 0 },
+        scale = { t.tileWidth, t.tileHeight * (kind == "straight" and 1 or 2), Geom.tileChord(kind, g) },
+        sound = false,
+        snap_to_grid = false,
+        callback_function = function(o)
+          o.setColorTint(tint(Config.palette[color]))
+          o.setName(color .. " G" .. g .. " " .. label)
+          o.addTag(VISUAL_TAG)
+          o.addTag("gc_tray_" .. color)
+          o.addTag("gc_tile")
+          Spawn.home[o.guid] = pos
+        end,
+      })
+    end
+  end
+end
+
+-- Send a dragged tile back to its slot.
+function Spawn.returnTile(obj)
+  local pos = Spawn.home[obj.guid]
+  if pos == nil then return end
+  obj.setRotation({ 0, 0, 0 })
+  obj.setPositionSmooth(pos, false, true)
+end
+
 -- Rebuild every visual from state (new game, or after load).
 function Spawn.rebuild(state)
   Spawn.clearAll()
@@ -127,6 +198,9 @@ function Spawn.rebuild(state)
       Spawn.tile(color, segs)
     end
     Spawn.rider(color, r.pose)
+  end
+  if Config.placementMode == "hand" then
+    for i, color in ipairs(state.order) do Spawn.trayTiles(color, i) end
   end
   for _, p in ipairs(state.prizms) do Spawn.prizm(p) end
   for i, m in ipairs(state.markers) do Spawn.marker(m.owner, i, m.segs[1]) end

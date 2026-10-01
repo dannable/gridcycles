@@ -48,6 +48,11 @@ Config = {
     riderSize = 0.9,
     matThickness = 0.1,
     matColor = { 0.03, 0.02, 0.08 },
+    tileWidth = 0.9,         -- hand-mode tray tiles
+    tileHeight = 0.2,
+    trayGap = 2.4,           -- spacing between tray slots (x)
+    trayRowDepth = 8,        -- spacing between riders' tray rows (z)
+    trayOffset = 6,          -- first tray row sits this far beyond the mat's south edge
     blockType = "BlockSquare",
     riderType = "BlockTriangle",
   },
@@ -70,6 +75,6 @@ Config = {
   prizmColor = { 0.85, 0.75, 1.00 },
 
   placementMode = "commit", -- "commit" | "hand"
-  snapRadius = 1.0,         -- hand mode only
+  snapRadius = 3.0,         -- hand mode: max distance from a tile's landing spot
   abilitiesEnabled = true,
 }

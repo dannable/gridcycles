@@ -5,12 +5,18 @@ local uiText = {}
 local broadcasts = {}
 local private = {}
 local seated = { "White" }
+guidCounter = 0
 
 local function makeObj(params)
-  local o = { params = params, tags = {} }
+  guidCounter = guidCounter + 1
+  local o = { params = params, tags = {}, guid = "g" .. guidCounter, pos = params.position, name = "" }
   function o.setColorTint() end
   function o.setLock() end
-  function o.setName() end
+  function o.setName(n) o.name = n end
+  function o.getName() return o.name end
+  function o.getPosition() return { x = o.pos[1], y = o.pos[2], z = o.pos[3] } end
+  function o.setRotation() end
+  function o.setPositionSmooth(p) o.pos = p; o.returned = (o.returned or 0) + 1 end
   function o.addTag(t) o.tags[t] = true end
   function o.destruct() o.dead = true end
   live[#live + 1] = o
@@ -255,5 +261,88 @@ describe("Lobby and UI (stubbed)", function()
     Events.restore()
     assert_eq(Config.prizmsToWin, 4)
     assert_eq(Events.settings.prizmsToWin, 4)
+  end)
+end)
+
+describe("Hand mode (stubbed)", function()
+  local host = { color = "Red", host = true }
+
+  local function tile(color, gear, label)
+    for _, o in ipairs(getObjectsWithTag("gc_tile")) do
+      if o.name == color .. " G" .. gear .. " " .. label then return o end
+    end
+  end
+
+  local function drop(color, gear, kind, label, dx)
+    local o = tile(color, gear, label)
+    local c = Geom.tileCenter(kind, gear, State.riders[color].pose)
+    o.pos = { c.x + (dx or 0), 2, c.z }
+    Events.handleDrop(color, o)
+    return o
+  end
+
+  it("lobby mode toggle switches to hand and trays spawn per rider", function()
+    Events.toLobby()
+    seated = { "Red", "Blue" }
+    Events.settings.maxPlayers = 2
+    Events.lobbyClick(host, "mode")
+    assert_eq(Events.settings.mode, "hand")
+    Events.lobbyClick(host, "start")
+    assert_eq(#getObjectsWithTag("gc_tile"), 2 * 15)
+    assert_eq(#getObjectsWithTag("gc_tray_Red"), 16)
+    assert_true(uiText.gcOdds_Red:find("Drag a tile", 1, true) ~= nil)
+    assert_eq(attrs["gcb_Red_straight.interactable"], "false")
+  end)
+
+  it("name parsing round-trips", function()
+    local c, g, k = Spawn.parseTileName("Red G3 Left")
+    assert_eq(c, "Red"); assert_eq(g, 3); assert_eq(k, "left")
+    assert_eq(Spawn.parseTileName("Prizm"), nil)
+  end)
+
+  it("a good drop commits the move, passes the turn and returns the tile", function()
+    State.riders.Red.pose = { x = 0, z = -10, heading = 0 }
+    State.prizms = {}
+    local o = drop("Red", 1, "straight", "Straight")
+    assert_eq(#State.riders.Red.trail.tiles, 1)
+    assert_eq(Rules.currentColor(State), "Blue")
+    assert_eq(o.returned, 1)
+  end)
+
+  it("a drop with a gear jump is rejected and returned", function()
+    local o = drop("Blue", 4, "straight", "Straight")
+    assert_eq(#State.riders.Blue.trail.tiles, 0)
+    assert_eq(Rules.currentColor(State), "Blue")
+    assert_eq(o.returned, 1)
+  end)
+
+  it("a drop far from the trail end is rejected", function()
+    local o = drop("Blue", 1, "straight", "Straight", Config.snapRadius + 2)
+    assert_eq(#State.riders.Blue.trail.tiles, 0)
+    assert_eq(o.returned, 1)
+  end)
+
+  it("a drop out of turn is rejected", function()
+    local o = drop("Red", 2, "straight", "Straight")
+    assert_eq(#State.riders.Red.trail.tiles, 1)
+    assert_eq(o.returned, 1)
+  end)
+
+  it("dropping someone else's tile is rejected", function()
+    local o = tile("Blue", 1, "Straight")
+    local c = Geom.tileCenter("straight", 1, State.riders.Blue.pose)
+    o.pos = { c.x, 2, c.z }
+    Events.handleDrop("Red", o)
+    assert_eq(#State.riders.Blue.trail.tiles, 0)
+  end)
+
+  it("a curve tile that fails its roll still places a straight", function()
+    local o = drop("Blue", 1, "left", "Left")
+    assert_eq(#State.riders.Blue.trail.tiles, 1)
+    assert_eq(o.returned ~= nil, true)
+  end)
+
+  it("non-tile objects are ignored", function()
+    Events.handleDrop("Red", { getName = function() return "Dice" end, guid = "x" })
   end)
 end)

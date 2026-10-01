@@ -168,3 +168,22 @@ function Geom.segmentPose(seg)
     heading = (atan2(dx, dz) / RAD) % 360,
   }
 end
+
+local function dist(p, q)
+  local dx, dz = p.x - q.x, p.z - q.z
+  return math.sqrt(dx * dx + dz * dz)
+end
+
+-- Straight-line distance from a tile's entry to its exit (used to size physical tiles).
+function Geom.tileChord(kind, gear)
+  local _, exit = Geom.tilePath(kind, gear, { x = 0, z = 0, heading = 0 })
+  return dist({ x = 0, z = 0 }, exit)
+end
+
+-- Midpoint between entry and exit of the tile that WOULD be laid from `pose`.
+function Geom.tileCenter(kind, gear, pose)
+  local _, exit = Geom.tilePath(kind, gear, pose)
+  return { x = (pose.x + exit.x) / 2, z = (pose.z + exit.z) / 2 }
+end
+
+Geom.distance = dist

@@ -271,3 +271,17 @@ function Rules.curveOdds(gear)
   end
   return ok, spin
 end
+
+-- Hand mode: may `color` drop a physical tile of (gear, kind) at table position
+-- pos = {x, z}? Returns true, shift on success; false, reason otherwise, where
+-- reason is "over" | "turn" | "gear" | "far".
+function Rules.validateTileDrop(state, color, gear, kind, pos)
+  if state.winner then return false, "over" end
+  if Rules.currentColor(state) ~= color then return false, "turn" end
+  local rider = state.riders[color]
+  local shift = gear - rider.gear
+  if math.abs(shift) > Config.gears.maxShift then return false, "gear" end
+  local center = Geom.tileCenter(kind, gear, rider.pose)
+  if Geom.distance(pos, center) > Config.snapRadius then return false, "far" end
+  return true, shift
+end

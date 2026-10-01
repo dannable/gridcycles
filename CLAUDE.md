@@ -5,7 +5,7 @@ Tabletop Simulator mod: neon light-cycle racing, an original reskin inspired by 
 
 ## Current status
 
-- **M0-M3 done and playtested. M4 code written (lobby, per-rider panels, status+log; UI generated in src/tts/ui.lua), awaiting David's playtest.** Next: M5 hand mode. Known: mat 36x36 overhangs the default hex table; use Options > Table > None.
+- **M0-M4 done and playtested. M5 code written (hand mode: tray tiles, onObjectDrop snap/reject), awaiting David's playtest.** Next: M6 art (needs David: Blender/Steam Cloud assets). Known: mat 36x36 overhangs the default hex table; use Options > Table > None.
 - Track milestone progress by ticking the table in PLAN.md section 7 as milestones complete.
 
 ## Commands

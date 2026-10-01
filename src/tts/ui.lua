@@ -136,7 +136,7 @@ function UI_.refresh()
   UI.setValue("gcl_players_val", tostring(s.maxPlayers))
   UI.setValue("gcl_prizms_val", tostring(s.prizmsToWin))
   UI.setValue("gcl_abilities", s.abilities and "ON" or "OFF")
-  UI.setValue("gcl_mode", s.mode == "hand" and "Hand (soon)" or "Commit")
+  UI.setValue("gcl_mode", s.mode == "hand" and "Hand" or "Commit")
   UI.setValue("gcl_seats", "Seat players, then press start. First "
     .. s.maxPlayers .. " seated colours race.")
 
@@ -146,6 +146,7 @@ function UI_.refresh()
   if not inGame then return end
 
   local cur = Rules.currentColor(State)
+  local hand = Config.placementMode == "hand"
   if State.winner then
     UI.setValue("gcStatus", State.winner .. " WINS!")
   else
@@ -169,6 +170,10 @@ function UI_.refresh()
       UI.setValue("gcOdds_" .. c, "Game over")
     elseif not mine then
       UI.setValue("gcOdds_" .. c, "Waiting for " .. cur .. "...")
+    elseif hand then
+      UI.setValue("gcOdds_" .. c, string.format(
+        "Drag a tile (G%d-G%d) from your tray to where your trail ends",
+        Rules.gearAfterShift(r.gear, -1), Rules.gearAfterShift(r.gear, 1)))
     else
       local ok, spin = Rules.curveOdds(g)
       local txt = string.format("After shift: G%d (%s). Curve success %d%%", g, SHIFT_NAMES[shift],
@@ -178,12 +183,12 @@ function UI_.refresh()
     end
     for action, v in pairs(SHIFT_ACTIONS) do
       local id = "gcb_" .. c .. "_" .. action
-      UI.setAttribute(id, "interactable", mine and "true" or "false")
+      UI.setAttribute(id, "interactable", (mine and not hand) and "true" or "false")
       UI.setAttribute(id, "color", (mine and v == Events.pendingShift) and "#05D9E8" or "#2A1B5C")
       UI.setAttribute(id, "textColor", (mine and v == Events.pendingShift) and "#000000" or "#FFFFFF")
     end
     for action in pairs(MOVE_ACTIONS) do
-      UI.setAttribute("gcb_" .. c .. "_" .. action, "interactable", mine and "true" or "false")
+      UI.setAttribute("gcb_" .. c .. "_" .. action, "interactable", (mine and not hand) and "true" or "false")
     end
   end
 end

@@ -27,3 +27,8 @@ function onSave()
   if State == nil then return "" end
   return JSON.encode(State)
 end
+
+-- Hand mode: a draggable tile was released.
+function onObjectDrop(playerColor, obj)
+  Events.handleDrop(playerColor, obj)
+end
