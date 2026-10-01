@@ -53,3 +53,15 @@ The VS Code extension (v1.1.3) does not expand `#include`. Instead:
 Raw Meshy exports live in `assets/source/` (git-ignored; the first export was 2.3M faces, so use Meshy's low-poly setting).
 `py -3.13 tools/prep_bike.py [+1|-1]` reorients the OBJ (nose +z, y up, origin bottom centre, length 1.0), lifts the greyscale texture, and writes `assets/models/bike.obj|mtl|png`. Needs `pip install numpy pillow`.
 TTS loads meshes by URL: upload `bike.obj` and `bike.png` somewhere public, then fill `Config.tts.riderModel.mesh` / `.diffuse`. If the bike faces backwards set `riderModel.yaw = 180`; adjust `scale` / `yOffset` to taste.
+
+## Pushing to TTS without VS Code (Linux desktop)
+
+Dev box (headless) and the machine running TTS can be different. On the TTS machine, with the repo cloned and Python 3 installed:
+
+```bash
+git pull && python3 tools/push_tts.py          # build + Save & Play
+python3 tools/push_tts.py --logs               # same, then stream TTS chat/errors
+```
+
+It talks to TTS's External Editor API on localhost:39999 (replies on 39998), so TTS must be running with a game loaded. Linux saves live in `~/.local/share/Tabletop Simulator/Saves/`.
+`prep_bike.py` on Linux: `python3 tools/prep_bike.py` (needs numpy, pillow).

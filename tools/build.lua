@@ -38,7 +38,11 @@ local function expand(name)
 end
 
 local flat = expand("Global")
-os.execute('mkdir build 2>nul')
+if package.config:sub(1, 1) == "\\" then
+  os.execute('mkdir build 2>nul')
+else
+  os.execute('mkdir -p build')
+end
 write("build/Global.lua", flat)
 print("wrote build/Global.lua (" .. #flat .. " bytes)")
 
