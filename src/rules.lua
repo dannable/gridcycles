@@ -108,6 +108,8 @@ function Rules.newState(colors, rollFn)
     prizms = {},
     markers = {},
     nextPrizmId = 1,
+    turn = 1,          -- index into order
+    winner = false,    -- colour of the winner once the game is won
   }
   for i, c in ipairs(colors) do state.order[i] = c end
   for _, c in ipairs(state.order) do
@@ -209,6 +211,7 @@ function Rules.resolveMove(state, color, move, rollFn)
 
   if rider.prizms >= Config.prizmsToWin then
     result.outcome = "win"
+    state.winner = color
     return result
   end
 
@@ -221,4 +224,14 @@ function Rules.resolveMove(state, color, move, rollFn)
     end
   end
   return result
+end
+
+function Rules.currentColor(state)
+  return state.order[state.turn]
+end
+
+-- Pass play to the next rider in seating order. No-op once the game is won.
+function Rules.advanceTurn(state)
+  if state.winner then return end
+  state.turn = state.turn % #state.order + 1
 end

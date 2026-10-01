@@ -52,12 +52,20 @@ Config = {
     riderType = "BlockTriangle",
   },
 
-  -- Neon palette per rider colour (r, g, b in 0..1)
+  -- Neon palette per TTS player colour (r, g, b in 0..1). Riders use the colour
+  -- of the seat they sit in; the first maxPlayers seated colours (in this order) play.
+  seatOrder = { "Red", "Blue", "Green", "Yellow", "Orange", "Teal", "Purple", "Pink", "White", "Brown" },
   palette = {
-    Red    = { 1.00, 0.16, 0.43 },   -- hot magenta
+    Red    = { 1.00, 0.16, 0.43 },   -- hot magenta-red
     Blue   = { 0.02, 0.85, 0.91 },   -- electric cyan
     Green  = { 0.22, 1.00, 0.08 },   -- acid green
     Yellow = { 1.00, 0.90, 0.00 },   -- laser yellow
+    Orange = { 1.00, 0.50, 0.05 },   -- sunset orange
+    Teal   = { 0.00, 1.00, 0.70 },   -- mint
+    Purple = { 0.65, 0.20, 1.00 },   -- ultraviolet
+    Pink   = { 1.00, 0.45, 0.90 },   -- bubblegum neon
+    White  = { 0.95, 0.95, 1.00 },   -- ice white
+    Brown  = { 0.80, 0.55, 0.30 },   -- amber
   },
   prizmColor = { 0.85, 0.75, 1.00 },
 

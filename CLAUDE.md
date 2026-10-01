@@ -5,7 +5,7 @@ Tabletop Simulator mod: neon light-cycle racing, an original reskin inspired by 
 
 ## Current status
 
-- **M0, M1, M2 done and playtested in TTS** (trails, curves, spin-outs, crashes, capture all confirmed by David). Next: M3 (turn order, multiplayer, win screen, save/load). Known: mat 36x36 overhangs the default hex table; use Options > Table > None.
+- **M0, M1, M2 done and playtested. M3 code written (turn order from seated colours, wrong-player rejection, win freeze, save/load rebuild), awaiting David's multiplayer playtest.** Next: M4 UI pass. Known: mat 36x36 overhangs the default hex table; use Options > Table > None.
 - Track milestone progress by ticking the table in PLAN.md section 7 as milestones complete.
 
 ## Commands
