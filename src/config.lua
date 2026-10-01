@@ -32,6 +32,10 @@ Config = {
 
   prizm = { length = 1.5 }, -- Prizm modelled as a segment of this length
 
+  launchMargin = 6,         -- keep launch points this far from mat corners
+  prizmEdgeMargin = 3,      -- keep Prizm centres this far from the mat edge
+  spawnTries = 50,          -- retries when a random spawn lands on something
+
   placementMode = "commit", -- "commit" | "hand"
   snapRadius = 1.0,         -- hand mode only
   abilitiesEnabled = true,
