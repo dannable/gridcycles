@@ -4,7 +4,7 @@ Name: **Gridcycles**. It's an original reskin inspired by *Lazer Ryderz* (Greate
 
 ## 1. Goals
 
-- Light-cycle racing on an open table for 2–4 players (stretch goal: 6).
+- Light-cycle racing on an open table for 2–4 players (stretch goal: 6). Four playable seats: Red, Blue, Green, Yellow.
 - **Scripted assist:** players still decide and place their own moves. Lua handles the bookkeeping: speed, turn rolls, snapping tiles to the trail end, collisions, Prizm captures, respawns and the win check.
 - Keep the original's core skill: **committing to a move without measuring it**.
 - Publish publicly. That means no original assets, logos, rider names or rules text.
@@ -19,11 +19,11 @@ Name: **Gridcycles**. It's an original reskin inspired by *Lazer Ryderz* (Greate
 | Element | v1 rule |
 |---|---|
 | Win | First to **3 Prizms** wins. |
-| Setup | Prizms are scattered at random across the play mat. Each rider gets a random launch point and heading on the mat edge (this replaces the original's "eyes-closed edge placement"). |
+| Setup | Prizms are scattered at random across the play mat. Each rider gets a random launch point and heading on the mat edge (bike tail on the edge) (this replaces the original's "eyes-closed edge placement"). |
 | Speed | 5 gears. At the start of your turn, shift up 1, down 1 or hold. Each gear has its own tile length (G1 shortest, G5 longest). |
 | Move | Choose **Straight**, **Curve L** or **Curve R** at your current gear. The tile attaches to your trail end. |
 | Turn check | A curve needs **d6 ≥ gear**. If you fail, you go straight instead. **Spin-out** (natural 1 at G4+, configurable): the curve happens, but your gear drops to G1. |
-| Crash | If your new tile crosses any trail, or leaves the mat, you crash. Your trail is removed, you respawn at a new random edge point at G1, and you keep your captured Prizms. |
+| Crash | If your new tile crosses any trail, **any rider's bike**, or leaves the mat, you crash. A bike is part of its owner's trail: it sits on the end of their last tile, nose on the trail end, and never blocks its owner. Your trail is removed, you respawn at a new random edge point at G1, and you keep your captured Prizms. |
 | Capture | If your tile fully crosses a Prizm's long axis, you capture it. Your colour marker takes its place, which blocks it like a trail. A new Prizm then spawns at a random free spot. |
 | Riders | 4 original riders, each with one ability (see §6). |
 

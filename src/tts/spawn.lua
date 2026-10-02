@@ -117,11 +117,14 @@ function Spawn.marker(owner, index, seg)
   }, Config.palette[owner], "gc_marker_" .. index)
 end
 
--- Rider mini sits at the trail end, pointing along the heading.
+-- The bike is part of its owner's trail: it sits on the end of the last tile with
+-- its nose on `pose` (see Geom.bikeSeg), so the model is centred half a bike length
+-- behind the pose.
 -- Custom bike mesh, spawned from a data table so tint/lock/tags are set up front
 -- (setCustomObject would respawn the object and drop them).
 local function customRider(color, pose)
   local t = Config.tts
+  local mid = Geom.segmentPose(Geom.bikeSeg(pose))
   local m = t.riderModel
   local group = "gc_rider_" .. color
   local c = Config.palette[color]
@@ -130,9 +133,9 @@ local function customRider(color, pose)
       Name = "Custom_Model",
       Nickname = color .. " rider",
       Transform = {
-        posX = pose.x, posY = t.tableY + t.matThickness + m.yOffset, posZ = pose.z,
+        posX = mid.x, posY = t.tableY + t.matThickness + m.yOffset, posZ = mid.z,
         rotX = 0, rotY = pose.heading + m.yaw, rotZ = 0,
-        scaleX = m.scale, scaleY = m.scale, scaleZ = m.scale,
+        scaleX = Config.bikeLength, scaleY = Config.bikeLength, scaleZ = Config.bikeLength,
       },
       ColorDiffuse = { r = c[1], g = c[2], b = c[3] },
       Locked = true,
@@ -158,9 +161,10 @@ function Spawn.rider(color, pose)
     customRider(color, pose)
     return
   end
+  local mid = Geom.segmentPose(Geom.bikeSeg(pose))
   place({
     type = t.riderType,
-    position = { pose.x, t.tableY + t.matThickness + t.riderSize / 2, pose.z },
+    position = { mid.x, t.tableY + t.matThickness + t.riderSize / 2, mid.z },
     rotation = { 0, pose.heading, 0 },
     scale = { t.riderSize, t.riderSize, t.riderSize },
     name = color .. " rider",

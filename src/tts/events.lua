@@ -41,6 +41,32 @@ local function seatedColors()
   return colors
 end
 
+-- Only the seats in Config.seatOrder are playable. Move anyone who sat elsewhere
+-- (including a seat they just switched to) to a free playable seat, or to
+-- spectator if all are taken.
+local SPECTATOR = { Grey = true, Black = true }
+
+function Events.enforceSeats()
+  for _, p in ipairs(Player.getPlayers()) do
+    local c = p.color
+    if not Config.palette[c] and not SPECTATOR[c] then
+      local free
+      for _, seat in ipairs(Config.seatOrder) do
+        if Player[seat] ~= nil and not Player[seat].seated then free = seat; break end
+      end
+      local name = p.steam_name or c
+      if free then
+        broadcastToAll(name .. ": only " .. table.concat(Config.seatOrder, ", ")
+          .. " can play. Moving you to " .. free .. ".", { 1, 1, 1 })
+        p.changeColor(free)
+      else
+        broadcastToAll(name .. ": all four seats are taken, moving you to spectator.", { 1, 1, 1 })
+        p.changeColor("Grey")
+      end
+    end
+  end
+end
+
 -- Mirror the current turn onto TTS's turn system (turn highlight).
 local function syncTurns()
   if State == nil then return end
@@ -160,7 +186,9 @@ local function describe(color, move, r)
     parts[#parts + 1] = "missed the turn, went straight"
   end
   if r.outcome == "crash" then
-    parts[#parts + 1] = "CRASH (" .. r.crashReason .. "), respawning"
+    local why = r.crashReason
+    if r.crashReason == "bike" then why = "hit " .. r.crashOwner .. "'s bike" end
+    parts[#parts + 1] = "CRASH (" .. why .. "), respawning"
   end
   if #r.captured > 0 then
     parts[#parts + 1] = "captured " .. #r.captured .. " Prizm(s)"

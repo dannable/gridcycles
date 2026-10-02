@@ -19,7 +19,11 @@
 --   result = { outcome = "placed"|"crash"|"win",
 --              gear, roll, spunOut, wentStraight, kind (the tile actually laid),
 --              segs, exitPose, captured = {prizmIds...}, spawned = {prizm...},
---              crashReason = "bounds"|"trail" (crash only), respawn = pose (crash only) }
+--              crashReason = "bounds"|"trail"|"bike" (crash only), crashOwner = colour whose
+--              trail/marker/bike was hit (not for "bounds"), respawn = pose (crash only) }
+--
+-- A rider's bike is part of their trail: Geom.bikeSeg(rider.pose), nose on the trail
+-- end. It blocks every other rider but never its owner.
 
 Rules = {}
 
@@ -33,11 +37,20 @@ local function rand(rollFn)
   return (rollFn(10000) - 1) / 9999
 end
 
-local function allTrails(state)
+-- Everything a new path can crash into: every trail, capture marker and bike.
+-- `exclude` names a rider whose own bike is left out (it never blocks its owner:
+-- the owner's next tile starts on the bike's nose).
+local function allTrails(state, exclude)
   local list = {}
   for _, color in ipairs(state.order) do
     local r = state.riders[color]
     if r then list[#list + 1] = { owner = color, segs = r.trail.segs } end
+  end
+  for _, color in ipairs(state.order) do
+    local r = state.riders[color]
+    if r and r.pose and color ~= exclude then
+      list[#list + 1] = { owner = color, kind = "bike", segs = { Geom.bikeSeg(r.pose) } }
+    end
   end
   for _, m in ipairs(state.markers) do
     list[#list + 1] = { owner = m.owner, segs = m.segs }
@@ -45,8 +58,10 @@ local function allTrails(state)
   return list
 end
 
--- Random edge launch point, heading inward. Retries if the point is on a trail.
-local function randomLaunch(state, rollFn)
+-- Random edge launch, heading inward, with the bike's tail on the edge (so the
+-- pose, the bike's nose, sits bikeLength inside). Retries if the bike would
+-- land on a trail or another bike.
+local function randomLaunch(state, rollFn, exclude)
   local mat = Config.mat
   local hw, hd = mat.width / 2, mat.depth / 2
   local m = Config.launchMargin
@@ -63,8 +78,8 @@ local function randomLaunch(state, rollFn)
     else                    -- east edge, heading -x
       pose = { x = hw, z = -hd + m + t * (mat.depth - 2 * m), heading = 270 }
     end
-    local probe = { a = { x = pose.x, z = pose.z }, b = { x = pose.x, z = pose.z } }
-    if not Geom.pathHitsTrails({ probe }, allTrails(state), nil) then return pose end
+    pose = Geom.advance(pose, Config.bikeLength)
+    if not Geom.pathHitsTrails({ Geom.bikeSeg(pose) }, allTrails(state, exclude), nil) then return pose end
   end
   return pose
 end
@@ -119,7 +134,7 @@ function Rules.newState(colors, rollFn)
       prizms = 0,
       trail = { segs = {}, tiles = {} },
     }
-    state.riders[c].pose = randomLaunch(state, rollFn)
+    state.riders[c].pose = randomLaunch(state, rollFn, c)
   end
   for _ = 1, Config.prizmsOnTable do
     local p = randomPrizm(state, rollFn)
@@ -161,18 +176,24 @@ function Rules.resolveMove(state, color, move, rollFn)
   }
 
   -- 4. crash checks
-  local crashReason
+  local crashReason, crashOwner
   if not Geom.inBounds(segs, Config.mat) then
     crashReason = "bounds"
-  elseif Geom.pathHitsTrails(segs, allTrails(state), { x = rider.pose.x, z = rider.pose.z }) then
-    crashReason = "trail"
+  else
+    local hit, trail = Geom.pathHitsTrails(segs, allTrails(state, color),
+      { x = rider.pose.x, z = rider.pose.z })
+    if hit then
+      crashReason = trail.kind == "bike" and "bike" or "trail"
+      crashOwner = trail.owner
+    end
   end
   if crashReason then
     rider.trail = { segs = {}, tiles = {} }
     rider.gear = Config.gears.min
-    rider.pose = randomLaunch(state, rollFn)
+    rider.pose = randomLaunch(state, rollFn, color)
     result.outcome = "crash"
     result.crashReason = crashReason
+    result.crashOwner = crashOwner
     result.gear = rider.gear
     result.respawn = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading }
     return result

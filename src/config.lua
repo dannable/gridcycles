@@ -32,6 +32,12 @@ Config = {
 
   prizm = { length = 1.5 }, -- Prizm modelled as a segment of this length
 
+  -- The bike is part of its owner's trail: a segment this long ending at the trail
+  -- end (nose on the exit of the last tile, tail back over it). Other riders crash
+  -- into it. It is also the in-game length of the bike model. A fresh launch puts
+  -- the tail on the mat edge.
+  bikeLength = 1.8,
+
   launchMargin = 6,         -- keep launch points this far from mat corners
   prizmEdgeMargin = 3,      -- keep Prizm centres this far from the mat edge
   spawnTries = 50,          -- retries when a random spawn lands on something
@@ -55,13 +61,12 @@ Config = {
     trayOffset = 6,          -- first tray row sits this far beyond the mat's south edge
     -- Custom rider mesh (assets/models/bike.obj + bike.png, uploaded somewhere public).
     -- Leave mesh empty to keep the grey-box triangle. The model is 1.0 long, nose +z,
-    -- origin at bottom centre; `scale` is the in-game length. Diffuse should be
+    -- origin at bottom centre; in-game length is Config.bikeLength. Diffuse should be
     -- greyscale: it is multiplied by the rider's neon colour.
     riderModel = {
       mesh = "https://raw.githubusercontent.com/dannable/gridcycles/v0.2-playtest/assets/models/bike.obj",
       diffuse = "https://raw.githubusercontent.com/dannable/gridcycles/v0.2-playtest/assets/models/bike.png",
       collider = "",         -- optional; defaults to the mesh
-      scale = 1.8,
       yaw = 180,              -- extra degrees if the bike points the wrong way (try 180)
       yOffset = 0,
     },
@@ -69,20 +74,14 @@ Config = {
     riderType = "BlockTriangle",
   },
 
-  -- Neon palette per TTS player colour (r, g, b in 0..1). Riders use the colour
-  -- of the seat they sit in; the first maxPlayers seated colours (in this order) play.
-  seatOrder = { "Red", "Blue", "Green", "Yellow", "Orange", "Teal", "Purple", "Pink", "White", "Brown" },
+  -- The four playable seats, in turn order. Neon colour (r, g, b in 0..1) per seat.
+  -- Anyone who sits in another colour is moved to a free seat from this list.
+  seatOrder = { "Red", "Blue", "Green", "Yellow" },
   palette = {
     Red    = { 1.00, 0.16, 0.43 },   -- hot magenta-red
     Blue   = { 0.02, 0.85, 0.91 },   -- electric cyan
     Green  = { 0.22, 1.00, 0.08 },   -- acid green
     Yellow = { 1.00, 0.90, 0.00 },   -- laser yellow
-    Orange = { 1.00, 0.50, 0.05 },   -- sunset orange
-    Teal   = { 0.00, 1.00, 0.70 },   -- mint
-    Purple = { 0.65, 0.20, 1.00 },   -- ultraviolet
-    Pink   = { 1.00, 0.45, 0.90 },   -- bubblegum neon
-    White  = { 0.95, 0.95, 1.00 },   -- ice white
-    Brown  = { 0.80, 0.55, 0.30 },   -- amber
   },
   prizmColor = { 0.85, 0.75, 1.00 },
 

@@ -20,7 +20,17 @@ function onLoad(saved)
   else
     Events.toLobby()   -- fresh table or stale save: show the lobby
   end
+  Wait.time(function() Events.enforceSeats() end, 1)
   print("Gridcycles loaded")
+end
+
+-- Only the four playable colours may be seated.
+function onPlayerConnect(player)
+  Wait.time(function() Events.enforceSeats() end, 1)
+end
+
+function onPlayerChangeColor(color)
+  Wait.time(function() Events.enforceSeats() end, 0.3)
 end
 
 function onSave()

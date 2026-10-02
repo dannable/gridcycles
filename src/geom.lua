@@ -93,8 +93,9 @@ local function touchesPoint(seg, p)
   return samePoint(seg.a, p) or samePoint(seg.b, p)
 end
 
--- True if any of newSegs hits any trail segment.
--- trails: array of { owner = color, segs = {Segment...} }
+-- True if any of newSegs hits any trail segment. A second return value is the
+-- trail entry that was hit.
+-- trails: array of { owner = color, segs = {Segment...}, kind = "bike"|nil }
 -- ignoreJoint: Point to ignore (the joint with the mover's own previous tile).
 -- A new/old segment pair that both end at the joint is skipped.
 function Geom.pathHitsTrails(newSegs, trails, ignoreJoint)
@@ -104,7 +105,7 @@ function Geom.pathHitsTrails(newSegs, trails, ignoreJoint)
         if Geom.segmentsIntersect(ns, old) then
           local atJoint = ignoreJoint ~= nil
             and touchesPoint(ns, ignoreJoint) and touchesPoint(old, ignoreJoint)
-          if not atJoint then return true end
+          if not atJoint then return true, trail end
         end
       end
     end
@@ -187,3 +188,16 @@ function Geom.tileCenter(kind, gear, pose)
 end
 
 Geom.distance = dist
+
+-- Pose moved `d` along its heading (negative d moves backwards).
+function Geom.advance(pose, d)
+  local h = pose.heading * RAD
+  return { x = pose.x + math.sin(h) * d, z = pose.z + math.cos(h) * d, heading = pose.heading }
+end
+
+-- The bike's footprint: a segment from its tail to its nose, where the nose sits
+-- on `pose` (the trail end) and the tail lies back along the last tile.
+function Geom.bikeSeg(pose)
+  local tail = Geom.advance(pose, -Config.bikeLength)
+  return { a = { x = tail.x, z = tail.z }, b = { x = pose.x, z = pose.z } }
+end

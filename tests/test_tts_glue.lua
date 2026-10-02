@@ -4,7 +4,7 @@ local live = {}   -- all stub objects not yet destructed
 local uiText = {}
 local broadcasts = {}
 local private = {}
-local seated = { "White" }
+local seated = { "Yellow" }
 guidCounter = 0
 
 local function makeObj(params)
@@ -51,11 +51,18 @@ function broadcastToAll(msg) broadcasts[#broadcasts + 1] = msg end
 function printToColor(msg, color) private[#private + 1] = { color = color, msg = msg } end
 Wait = { time = function(f) f() end }
 Turns = {}
-Player = { getPlayers = function()
+local changed = {}
+Player = setmetatable({ getPlayers = function()
   local out = {}
-  for _, c in ipairs(seated) do out[#out + 1] = { color = c, seated = true } end
+  for _, c in ipairs(seated) do
+    out[#out + 1] = { color = c, seated = true, steam_name = "p_" .. c,
+      changeColor = function(to) changed[c] = to end }
+  end
   return out
-end }
+end }, { __index = function(_, c)
+  for _, s in ipairs(seated) do if s == c then return { seated = true } end end
+  return { seated = false }
+end })
 
 dofile("src/tts/spawn.lua")
 dofile("src/tts/ui.lua")
@@ -72,57 +79,57 @@ end
 
 describe("TTS glue, solo (stubbed)", function()
   it("newGame uses the seated colour and spawns mat, rider and Prizms", function()
-    seated = { "White" }
+    seated = { "Yellow" }
     Events.newGame()
     assert_eq(#State.order, 1)
-    assert_eq(State.order[1], "White")
+    assert_eq(State.order[1], "Yellow")
     assert_eq(count("gc_mat"), 1)
-    assert_eq(count("gc_rider_White"), 1)
+    assert_eq(count("gc_rider_Yellow"), 1)
     assert_eq(count("gc_visual"), 1 + 1 + Config.prizmsOnTable)
-    assert_true(uiText.gcStatus:find("White's turn") ~= nil)
-    assert_eq(Turns.turn_color, "White")
+    assert_true(uiText.gcStatus:find("Yellow's turn") ~= nil)
+    assert_eq(Turns.turn_color, "Yellow")
   end)
 
   it("nobody seated falls back to a solo Red sandbox", function()
     seated = {}
     Events.newGame()
     assert_eq(State.order[1], "Red")
-    seated = { "White" }
+    seated = { "Yellow" }
     Events.newGame()
   end)
 
   it("a placed move adds trail blocks and moves the rider mini", function()
-    State.riders.White.pose = { x = 0, z = 0, heading = 0 }
+    State.riders.Yellow.pose = { x = 0, z = 0, heading = 0 }
     State.prizms = {}
-    Events.commitMove("White", "straight")
-    assert_eq(count("gc_trail_White"), 1)
-    assert_eq(count("gc_rider_White"), 1)
+    Events.commitMove("Yellow", "straight")
+    assert_eq(count("gc_trail_Yellow"), 1)
+    assert_eq(count("gc_rider_Yellow"), 1)
   end)
 
   it("shift is applied once then resets", function()
-    Events.setShift("White", 1)
+    Events.setShift("Yellow", 1)
     assert_eq(Events.pendingShift, 1)
-    Events.commitMove("White", "straight")
+    Events.commitMove("Yellow", "straight")
     assert_eq(Events.pendingShift, 0)
-    assert_eq(State.riders.White.gear, 2)
+    assert_eq(State.riders.Yellow.gear, 2)
   end)
 
   it("a crash clears the trail objects", function()
-    State.riders.White.pose = { x = 0, z = Config.mat.depth / 2, heading = 0 }
-    Events.commitMove("White", "straight")
-    assert_eq(count("gc_trail_White"), 0)
-    assert_eq(count("gc_rider_White"), 1)
+    State.riders.Yellow.pose = { x = 0, z = Config.mat.depth / 2, heading = 0 }
+    Events.commitMove("Yellow", "straight")
+    assert_eq(count("gc_trail_Yellow"), 0)
+    assert_eq(count("gc_rider_Yellow"), 1)
   end)
 
   it("capture removes the Prizm and adds a marker", function()
-    State.riders.White.pose = { x = 0, z = -10, heading = 0 }
-    State.riders.White.gear = 1
+    State.riders.Yellow.pose = { x = 0, z = -10, heading = 0 }
+    State.riders.Yellow.gear = 1
     State.prizms = { { id = 50, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } }
     Spawn.prizm(State.prizms[1])
-    Events.commitMove("White", "straight")
+    Events.commitMove("Yellow", "straight")
     assert_eq(count("gc_prizm_50"), 0)
     assert_eq(count("gc_marker_1"), 1)
-    assert_eq(State.riders.White.prizms, 1)
+    assert_eq(State.riders.Yellow.prizms, 1)
   end)
 
   it("restore rebuilds visuals from a copy of the saved state", function()
@@ -130,7 +137,7 @@ describe("TTS glue, solo (stubbed)", function()
     Events.restore()
     assert_eq(count("gc_mat"), 1)
     assert_eq(count("gc_marker_1"), 1)
-    assert_eq(count("gc_rider_White"), 1)
+    assert_eq(count("gc_rider_Yellow"), 1)
   end)
 end)
 
@@ -378,18 +385,49 @@ describe("Custom rider mesh (stubbed)", function()
   it("spawns a Custom_Model with colour, heading, yaw and scale when a mesh is set", function()
     Events.toLobby()
     local m = Config.tts.riderModel
-    m.mesh, m.diffuse, m.yaw, m.scale = "http://x/bike.obj", "http://x/bike.png", 180, 2
+    m.mesh, m.diffuse, m.yaw = "http://x/bike.obj", "http://x/bike.png", 180
     Spawn.rider("Red", { x = 3, z = 4, heading = 90 })
     local d = dataSpawns[#dataSpawns]
     assert_eq(d.Name, "Custom_Model")
     assert_eq(d.CustomMesh.MeshURL, "http://x/bike.obj")
     assert_eq(d.CustomMesh.ColliderURL, "http://x/bike.obj")
     assert_eq(d.Transform.rotY, 270)
-    assert_eq(d.Transform.scaleX, 2)
+    assert_eq(d.Transform.scaleX, Config.bikeLength)
+    -- model is centred half a bike length behind the pose (heading 90 = +x)
+    assert_near(d.Transform.posX, 3 - Config.bikeLength / 2)
+    assert_near(d.Transform.posZ, 4)
     assert_near(d.ColorDiffuse.r, Config.palette.Red[1])
     assert_eq(count("gc_rider_Red"), 1)
     Spawn.rider("Red", { x = 3, z = 4, heading = 0 })
     assert_eq(count("gc_rider_Red"), 1, "old rider replaced")
-    m.mesh, m.diffuse, m.yaw, m.scale = "", "", 0, 1.8
+    m.mesh, m.diffuse, m.yaw = "", "", 0
+  end)
+end)
+
+describe("Seat enforcement (stubbed)", function()
+  it("moves a player sitting in a non-playable colour to a free playable seat", function()
+    seated = { "Red", "Orange" }
+    changed = {}
+    Events.enforceSeats()
+    assert_eq(changed.Orange, "Blue")
+    assert_eq(changed.Red, nil)
+  end)
+  it("sends them to spectator when all four seats are taken", function()
+    seated = { "Red", "Blue", "Green", "Yellow", "White" }
+    changed = {}
+    Events.enforceSeats()
+    assert_eq(changed.White, "Grey")
+  end)
+  it("leaves spectators and playable seats alone", function()
+    seated = { "Red", "Grey", "Black" }
+    changed = {}
+    Events.enforceSeats()
+    assert_eq(next(changed), nil)
+  end)
+  it("only the four playable colours have a palette entry", function()
+    local n = 0
+    for _ in pairs(Config.palette) do n = n + 1 end
+    assert_eq(n, 4)
+    assert_eq(#Config.seatOrder, 4)
   end)
 end)

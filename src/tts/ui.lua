@@ -139,8 +139,8 @@ function UI_.refresh()
   UI.setValue("gcl_prizms_val", tostring(s.prizmsToWin))
   UI.setValue("gcl_abilities", s.abilities and "ON" or "OFF")
   UI.setValue("gcl_mode", s.mode == "hand" and "Hand" or "Commit")
-  UI.setValue("gcl_seats", "Seat players, then press start. First "
-    .. s.maxPlayers .. " seated colours race.")
+  UI.setValue("gcl_seats", "Sit in " .. table.concat(Config.seatOrder, ", ")
+    .. ", then press start. First " .. s.maxPlayers .. " seated colours race.")
 
   local inGame = State ~= nil
   setActive("gcLobby", not inGame)
