@@ -58,8 +58,8 @@ Config = {
     -- origin at bottom centre; `scale` is the in-game length. Diffuse should be
     -- greyscale: it is multiplied by the rider's neon colour.
     riderModel = {
-      mesh = "https://raw.githubusercontent.com/dannable/gridcycles/v0.1-playtest/assets/models/bike.obj",
-      diffuse = "https://raw.githubusercontent.com/dannable/gridcycles/v0.1-playtest/assets/models/bike.png",
+      mesh = "https://raw.githubusercontent.com/dannable/gridcycles/v0.2-playtest/assets/models/bike.obj",
+      diffuse = "https://raw.githubusercontent.com/dannable/gridcycles/v0.2-playtest/assets/models/bike.png",
       collider = "",         -- optional; defaults to the mesh
       scale = 1.8,
       yaw = 0,               -- extra degrees if the bike points the wrong way (try 180)
