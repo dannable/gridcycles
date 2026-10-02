@@ -3,7 +3,8 @@
 -- and event-log panel. The XML is generated here (UI_.buildXml) because rider
 -- panels depend on who is seated; ui/Global.xml is just a boot stub.
 --
--- Element ids:  gcLobby, gcl_*  lobby      gcStatusPanel, gcStatus, gcScore, gcLog
+-- Element ids:  gcLobby, gcl_*  lobby      gcStatusPanel, gcStatus, gcScore, gcOrder, gcLog
+--               gcPick_<Color>, gcb_<Color>_gear<N>  respawn gear picker
 --               gcPanel_<Color>, gcGear_<Color>, gcOdds_<Color>, gcb_<Color>_<action>
 -- Every button uses onClick="gcClick"; the id says what was pressed.
 
@@ -105,10 +106,30 @@ local function riderXml(color)
     b("softright", "Soft R", h, "#000000"), b("hardright", "Hard R", h, "#000000"))
 end
 
+-- Shown (to that rider and the host) after a crash: pick the gear to respawn in.
+local function pickXml(color)
+  local h = hex(color)
+  local buttons = {}
+  for g = Config.gears.min, Config.gears.max do
+    buttons[#buttons + 1] = button("gcb_" .. color .. "_gear" .. g, "G" .. g, h, "#000000", ' fontSize="22"')
+  end
+  return string.format([[
+<Panel id="gcPick_%s" active="false" visibility="%s|Host" width="460" height="130" rectAlignment="MiddleCenter"
+       offsetXY="0 60" color="#0A0618F2" padding="12 12 12 12">
+  <VerticalLayout spacing="8">
+    <Text fontSize="20" color="%s" alignment="MiddleCenter" fontStyle="Bold" preferredHeight="34">%s crashed! Choose your respawn gear</Text>
+    <HorizontalLayout spacing="8" preferredHeight="48">%s</HorizontalLayout>
+  </VerticalLayout>
+</Panel>]], color, color, h, color, table.concat(buttons))
+end
+
 -- Whole-UI XML. colors = riders in the current game (empty in the lobby).
 function UI_.buildXml(colors)
   local parts = { lobbyXml(), statusXml() }
-  for _, c in ipairs(colors or {}) do parts[#parts + 1] = riderXml(c) end
+  for _, c in ipairs(colors or {}) do
+    parts[#parts + 1] = riderXml(c)
+    parts[#parts + 1] = pickXml(c)
+  end
   return table.concat(parts, "\n")
 end
 
@@ -178,6 +199,8 @@ function UI_.refresh()
   local hand = Config.placementMode == "hand"
   if State.winner then
     UI.setValue("gcStatus", State.winner .. " WINS!")
+  elseif State.pendingGear then
+    UI.setValue("gcStatus", State.pendingGear .. " is choosing a gear")
   else
     UI.setValue("gcStatus", cur .. "'s turn")
   end
@@ -191,13 +214,18 @@ function UI_.refresh()
 
   for _, c in ipairs(State.order) do
     local r = State.riders[c]
-    local mine = (c == cur) and not State.winner
+    local mine = (c == cur) and not State.winner and not State.pendingGear
     setActive("gcPanel_" .. c, true)
+    setActive("gcPick_" .. c, State.pendingGear == c)
     local shift = mine and Events.pendingShift or 0
     local g = Rules.gearAfterShift(r.gear, shift)
     UI.setValue("gcGear_" .. c, string.format("GEAR %d  [%s]", r.gear, bar(r.gear)))
     if State.winner then
       UI.setValue("gcOdds_" .. c, "Game over")
+    elseif State.pendingGear == c then
+      UI.setValue("gcOdds_" .. c, "You crashed! Choose your respawn gear")
+    elseif State.pendingGear then
+      UI.setValue("gcOdds_" .. c, "Waiting for " .. State.pendingGear .. " to choose a gear...")
     elseif not mine then
       UI.setValue("gcOdds_" .. c, "Waiting for " .. cur .. "...")
     elseif hand then
@@ -247,8 +275,13 @@ function UI_.handle(player, id)
     Events.lobbyClick(player, lobbyAction)
     return
   end
-  local color, action = id:match("^gcb_(%a+)_(%a+)$")
+  local color, action = id:match("^gcb_(%a+)_(%w+)$")
   if not color then return end
+  local gear = action:match("^gear(%d)$")
+  if gear then
+    Events.chooseGear(player, tonumber(gear))   -- the host may pick for the crashed rider
+    return
+  end
   if color ~= player.color then return end   -- panel is only shown to its owner anyway
   if SHIFT_ACTIONS[action] ~= nil then
     Events.setShift(player.color, SHIFT_ACTIONS[action])

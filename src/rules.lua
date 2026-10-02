@@ -19,6 +19,7 @@
 --     prizms  = { { id, a = Point, b = Point, owner = color|nil } ... },   -- owner nil = unscored
 --     nextPrizmId = n,
 --     winner = color|false,
+--     pendingGear = color|false,      -- a rider who crashed and must choose their respawn gear
 --   }
 --
 -- Pieces: every tile has a gear and a shape ("straight" | "soft" | "hard"); riders own a
@@ -287,6 +288,7 @@ function Rules.newState(colors, rollFn)
     round = 1,
     tieBreaker = 1,
     winner = false,    -- colour of the winner once the game is won
+    pendingGear = false,
   }
   for i, c in ipairs(colors) do state.order[i] = c end
   for _, c in ipairs(state.order) do
@@ -315,13 +317,16 @@ function Rules.newState(colors, rollFn)
 end
 
 -- Wipe the rider's trail (returning their whole tile supply) and respawn them.
--- Scored Prizms stay on the table.
+-- Scored Prizms stay on the table. The rider then picks their starting gear
+-- (Rules.chooseGear); until they do, state.pendingGear names them and the turn
+-- does not pass. The gear is G1 until chosen.
 function Rules.crash(state, color, reason, owner, rollFn)
   local rider = state.riders[color]
   rider.trail = { segs = {}, tiles = {} }
   rider.supply = fullSupply()
   rider.gear = Config.gears.min
   rider.pose = randomLaunch(state, rollFn, color)
+  state.pendingGear = color
   return {
     outcome = "crash", crashReason = reason, crashOwner = owner,
     gear = rider.gear, captured = {}, spawned = {}, scored = {}, stolen = {}, nudged = {},
@@ -508,15 +513,27 @@ function Rules.resolveMove(state, color, move, rollFn)
   return result
 end
 
+-- A rider who just crashed picks any gear to respawn in. Returns true, or false and a
+-- reason: "none" (nobody is choosing), "who" (not that rider), "range" (no such gear).
+function Rules.chooseGear(state, color, gear)
+  if not state.pendingGear then return false, "none" end
+  if state.pendingGear ~= color then return false, "who" end
+  if type(gear) ~= "number" or gear ~= math.floor(gear)
+    or gear < Config.gears.min or gear > Config.gears.max then return false, "range" end
+  state.riders[color].gear = gear
+  state.pendingGear = false
+  return true
+end
+
 function Rules.currentColor(state)
   return state.roundOrder[state.turn]
 end
 
 -- Pass play to the next rider this round; after the last, start a new round (the order
 -- is re-sorted by gear and the tie-breaker moves on). Returns true if a new round began.
--- No-op once the game is won.
+-- No-op once the game is won, or while a crashed rider still has to choose their gear.
 function Rules.advanceTurn(state)
-  if state.winner then return false end
+  if state.winner or state.pendingGear then return false end
   if state.turn < #state.roundOrder then
     state.turn = state.turn + 1
     return false
@@ -536,6 +553,7 @@ function Rules.isValidState(state)
     or state.roundOrder[state.turn] == nil then return false end
   if type(state.round) ~= "number" or type(state.tieBreaker) ~= "number" then return false end
   if type(state.riders) ~= "table" or type(state.prizms) ~= "table" then return false end
+  if state.pendingGear and state.riders[state.pendingGear] == nil then return false end
   for _, c in ipairs(state.order) do
     local r = state.riders[c]
     if type(r) ~= "table" or type(r.pose) ~= "table" or type(r.trail) ~= "table"
@@ -565,9 +583,10 @@ end
 
 -- Hand mode: may `color` drop a physical tile of (gear, kind) at table position
 -- pos = {x, z}? Returns true, shift on success; false, reason otherwise, where
--- reason is "over" | "turn" | "gear" | "far".
+-- reason is "over" | "pick" | "turn" | "gear" | "far".
 function Rules.validateTileDrop(state, color, gear, kind, pos, shape)
   if state.winner then return false, "over" end
+  if state.pendingGear then return false, "pick" end
   if Rules.currentColor(state) ~= color then return false, "turn" end
   local rider = state.riders[color]
   local shift = gear - rider.gear

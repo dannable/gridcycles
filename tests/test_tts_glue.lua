@@ -115,11 +115,22 @@ describe("TTS glue, solo (stubbed)", function()
     assert_eq(State.riders.Yellow.gear, 2)
   end)
 
-  it("a crash clears the trail objects", function()
+  it("a crash clears the trail objects and asks the rider for a respawn gear", function()
     State.riders.Yellow.pose = { x = 0, z = Config.mat.depth / 2, heading = 0 }
     Events.commitMove("Yellow", "straight")
     assert_eq(count("gc_trail_Yellow"), 0)
     assert_eq(count("gc_rider_Yellow"), 1)
+    assert_eq(State.pendingGear, "Yellow")
+    assert_eq(attrs["gcPick_Yellow.active"], "true")
+    assert_true(uiText.gcOdds_Yellow:find("Choose your respawn gear", 1, true) ~= nil)
+    assert_true(uiText.gcStatus:find("choosing a gear", 1, true) ~= nil)
+    assert_true(uiText.xml:find("gcb_Yellow_gear5", 1, true) ~= nil, "gear buttons exist")
+    Events.commitMove("Yellow", "straight")
+    assert_eq(#State.riders.Yellow.trail.tiles, 0, "no moves while the gear is pending")
+    Events.chooseGear({ color = "Yellow", host = false }, 4)
+    assert_eq(State.riders.Yellow.gear, 4)
+    assert_eq(State.pendingGear, false)
+    assert_eq(attrs["gcPick_Yellow.active"], "false")
   end)
 
   it("scoring redraws the Prizm in the rider's colour", function()
@@ -170,11 +181,27 @@ describe("TTS glue, multiplayer (stubbed)", function()
     assert_true(uiText.gcStatus:find("Blue's turn") ~= nil)
   end)
 
-  it("a crash also passes the turn; the round ends and a new order is announced", function()
+  it("a crash holds the turn until the gear is chosen; then the round ends on the new gear", function()
     State.riders.Blue.pose = { x = 0, z = Config.mat.depth / 2, heading = 0 }
     Events.commitMove("Blue", "straight")
+    assert_eq(State.pendingGear, "Blue")
+    assert_eq(State.round, 1, "turn not passed yet")
+    assert_eq(Turns.turn_color, "Blue")
+    assert_true(uiText.gcOdds_Red:find("Waiting for Blue", 1, true) ~= nil, uiText.gcOdds_Red)
+    -- someone else can't choose, and nobody can move meanwhile
+    local before = #private
+    Events.chooseGear({ color = "Red", host = false }, 3)
+    assert_eq(State.pendingGear, "Blue")
+    assert_true(#private > before)
+    Events.commitMove("Red", "straight")
+    assert_eq(State.round, 1)
+    -- bad gear is ignored; the host can pick for the crashed rider
+    Events.chooseGear({ color = "Red", host = true }, 9)
+    assert_eq(State.pendingGear, "Blue")
+    Events.chooseGear({ color = "Red", host = true }, 4)
+    assert_eq(State.riders.Blue.gear, 4)
     assert_eq(State.round, 2)
-    assert_eq(Rules.currentColor(State), "Blue", "tie-breaker moved on, both in gear 1")
+    assert_eq(Rules.currentColor(State), "Blue", "gear 4 beats gear 1")
     assert_eq(Turns.turn_color, "Blue")
     assert_eq(Turns.order[1], "Blue")
     local said = false
@@ -592,5 +619,32 @@ describe("Prizm stealing and victims on the table (stubbed)", function()
     local said = false
     for _, m in ipairs(broadcasts) do if m:find("Blue loses 2 tile", 1, true) then said = true end end
     assert_true(said)
+  end)
+end)
+
+describe("Respawn gear picker (stubbed)", function()
+  it("the pick buttons route to chooseGear for the crashed rider only", function()
+    Events.settings.mode = "commit"
+    seated = { "Red", "Blue" }
+    Events.newGame()
+    State.prizms = {}
+    State.riders.Red.pose = { x = 0, z = Config.mat.depth / 2, heading = 0 }
+    Events.commitMove("Red", "straight")
+    assert_eq(State.pendingGear, "Red")
+    UI_.handle({ color = "Blue", host = false }, "gcb_Red_gear2")
+    assert_eq(State.pendingGear, "Red", "another player cannot pick")
+    UI_.handle({ color = "Red", host = false }, "gcb_Red_gear2")
+    assert_eq(State.pendingGear, false)
+    assert_eq(State.riders.Red.gear, 2)
+    assert_eq(Rules.currentColor(State), "Blue")
+  end)
+  it("a pending pick survives save and load", function()
+    State.riders.Blue.pose = { x = 0, z = Config.mat.depth / 2, heading = 0 }
+    Events.commitMove("Blue", "straight")
+    assert_eq(State.pendingGear, "Blue")
+    State = deepcopy(State)
+    assert_true(Rules.isValidState(State))
+    Events.restore()
+    assert_eq(attrs["gcPick_Blue.active"], "true")
   end)
 end)

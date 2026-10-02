@@ -163,6 +163,10 @@ local function mayAct(playerColor)
     printToColor("The game is over. The host can go back to the lobby.", playerColor, { 1, 1, 1 })
     return false
   end
+  if State.pendingGear then
+    printToColor(State.pendingGear .. " is choosing a respawn gear.", playerColor, rgb(State.pendingGear))
+    return false
+  end
   local cur = Rules.currentColor(State)
   if playerColor ~= cur then
     printToColor("Not your turn. It's " .. cur .. "'s.", playerColor, rgb(cur))
@@ -249,6 +253,19 @@ end
 
 -- playerColor: the TTS colour of whoever clicked. kind: "straight"|"left"|"right";
 -- curve: "soft"|"hard" (curves only).
+-- The mover's turn is over: pass play on (starting a new round if that was the last turn).
+local function endTurn(color)
+  local newRound = Rules.advanceTurn(State)
+  local nxt = Rules.currentColor(State)
+  if newRound and #State.order > 1 then
+    announceRound()
+  elseif nxt ~= color then
+    say(nxt .. "'s turn.", rgb(nxt))
+  end
+  syncTurns()
+  UI_.refresh()
+end
+
 function Events.commitMove(playerColor, kind, curve)
   if not mayAct(playerColor) then return end
   local color = playerColor
@@ -260,23 +277,38 @@ function Events.commitMove(playerColor, kind, curve)
   if r.outcome == "win" then
     say("=== " .. string.upper(color) .. " WINS with "
       .. Rules.prizmCount(State, color) .. " Prizms! Host: Back to lobby to race again. ===", rgb(color))
+    syncTurns()
+    UI_.refresh()
+  elseif r.outcome == "crash" then
+    -- the turn is not over until the crashed rider picks the gear they respawn in
+    say(color .. ", choose your respawn gear.", rgb(color))
+    syncTurns()
+    UI_.refresh()
   else
-    local newRound = Rules.advanceTurn(State)
-    local nxt = Rules.currentColor(State)
-    if newRound and #State.order > 1 then
-      announceRound()
-    elseif nxt ~= color then
-      say(nxt .. "'s turn.", rgb(nxt))
-    end
+    endTurn(color)
   end
-  syncTurns()
-  UI_.refresh()
+end
+
+-- A crashed rider picks their respawn gear (the host may pick for them, so an absent
+-- player can't stall the table). `player` is the clicking TTS player: { color, host }.
+function Events.chooseGear(player, gear)
+  if State == nil or not State.pendingGear then return end
+  local color = State.pendingGear
+  if player.color ~= color and not player.host then
+    printToColor("Only " .. color .. " (or the host) can choose that.", player.color, { 1, 1, 1 })
+    return
+  end
+  local ok = Rules.chooseGear(State, color, gear)
+  if not ok then return end
+  say(color .. " respawns in G" .. gear .. ".", rgb(color))
+  endTurn(color)
 end
 
 -- Hand mode: a tile was dropped. Whatever happens, it goes back to its tray slot;
 -- if the drop was legal, the move is committed through the normal pipeline.
 local DROP_MESSAGES = {
   turn = "It isn't your turn.",
+  pick = "A crashed rider has to choose a respawn gear first.",
   over = "The game is over.",
   gear = "That tile is more than %d gear(s) from your current gear (G%d).",
   far  = "Drop the tile closer to where your trail ends.",

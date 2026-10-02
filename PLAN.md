@@ -25,6 +25,7 @@ Name: **Gridcycles**. It's an original reskin inspired by *Lazer Ryderz* (Greate
 | Out of pieces | If the exact piece is gone, use the same kind from the next gear down (a curve tries the other curve shape in the same gear first). If nothing at your gear or below is left, your **oldest tiles come off the line one at a time** until a piece fits. Your gear is unchanged. |
 | Move | Choose **Straight**, or a **soft** or **hard** curve to the left or right, at your current gear. The tile attaches to your trail end. |
 | Turn check | The curve die has faces 1, 2, 3, 4, 5 and a spin-out face. A numbered face **≥ your gear** succeeds (place the curve); a lower one fails (place a straight instead). The **spin-out** face (1 in 6, any gear) places the curve, then drops you to G1. |
+| Respawn | After a crash you respawn at a random edge point and **choose any gear** (the host can pick for you). Your turn ends once you have. |
 | Crash | If your new tile crosses any trail, **any rider's bike**, or leaves the mat, you crash. A bike is part of its owner's trail: it sits on the end of their last tile, nose on the trail end, and never blocks its owner. Your trail is removed, you respawn at a new random edge point at G1, and you keep your captured Prizms. |
 | Capture | If your tile fully crosses an unscored Prizm's long axis (within half a wall width of its ends), you **score** it: it takes your colour and stays where it is, and a new unscored Prizm is tossed onto the table. Crossing another rider's scored Prizm **steals** it (no new Prizm). Scored Prizms stay on the table when their owner crashes. |
 | Pass-through | Contact right on top of a Prizm never crashes, so a Prizm is a gap in any wall. |
@@ -174,11 +175,11 @@ Team mode (2v2, allies can cross each other's trails), Prizm relay (carry a Priz
 
 ## 10. Rules backlog (from comparing with the tabletop game's published rules)
 
-Done: typed, limited pieces; substitution and oldest-tile removal; the curve die (spin-out face); crash victims lose pieces; Prizm scoring, stealing, pass-through, nudge and locking; the three-at-once win; unscored Prizms evenly spaced on a ring, replaced when scored; turn order by gear with a rotating tie-breaker.
+Done: choosing your gear when you respawn; typed, limited pieces; substitution and oldest-tile removal; the curve die (spin-out face); crash victims lose pieces; Prizm scoring, stealing, pass-through, nudge and locking; the three-at-once win; unscored Prizms evenly spaced on a ring, replaced when scored; turn order by gear with a rotating tie-breaker.
 
 Not yet matching, roughly by impact on play:
 
-1. **Respawn gear.** After a crash you choose any starting gear; we force G1. Initial gears are chosen blind and equal picks stall to G1; we start everyone at G1.
+1. **Starting gear.** Initial gears are chosen blind and equal picks stall to G1; we start everyone at G1. (Respawn gear is now chosen, see above.)
 2. **Launch point is a wall piece**, and start positions are placed blind. Ours is a random edge point and the launch is not part of the line.
 3. **Scoring across two turns.** A line that stops partway over a Prizm can finish scoring next turn; ours checks only the newly laid tile.
 4. **Scored Prizm placement.** The real game slides a newly scored Prizm to the front of the scoring tile; ours stays where it was crossed.
