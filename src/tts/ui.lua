@@ -81,17 +81,18 @@ local function riderXml(color)
     return button("gcb_" .. color .. "_" .. action, label, bg, fg)
   end
   return string.format([[
-<Panel id="gcPanel_%s" active="false" visibility="%s" width="470" height="250" rectAlignment="LowerCenter"
+<Panel id="gcPanel_%s" active="false" visibility="%s" width="470" height="274" rectAlignment="LowerCenter"
        offsetXY="0 20" color="#0A0618E6" padding="10 10 10 10">
   <VerticalLayout spacing="6">
     <Text id="gcGear_%s" fontSize="22" color="%s" alignment="MiddleCenter" fontStyle="Bold" preferredHeight="32"></Text>
     <Text id="gcOdds_%s" fontSize="14" color="#D9C8FF" alignment="MiddleCenter" preferredHeight="22"></Text>
+    <Text id="gcSupply_%s" fontSize="13" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="20"></Text>
     <Text fontSize="12" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="16">1. choose a shift (optional)</Text>
     <HorizontalLayout spacing="8">%s%s%s</HorizontalLayout>
     <Text fontSize="12" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="16">2. commit your move (no take-backs)</Text>
     <HorizontalLayout spacing="8">%s%s%s</HorizontalLayout>
   </VerticalLayout>
-</Panel>]], color, color, color, h, color,
+</Panel>]], color, color, color, h, color, color,
     b("shiftdown", "Shift down", "#2A1B5C"), b("shifthold", "Hold", "#2A1B5C"), b("shiftup", "Shift up", "#2A1B5C"),
     b("left", "Curve L", h, "#000000"), b("straight", "Straight", h, "#000000"), b("right", "Curve R", h, "#000000"))
 end
@@ -183,14 +184,21 @@ function UI_.refresh()
       if spin > 0 then txt = txt .. ", spin-out " .. math.floor(spin * 100 + 0.5) .. "%" end
       UI.setValue("gcOdds_" .. c, txt)
     end
+    local left = {}
+    for gr = Config.gears.min, Config.gears.max do
+      left[#left + 1] = string.format("G%d:%d", gr, Rules.supplyLeft(State, c, gr))
+    end
+    UI.setValue("gcSupply_" .. c, "Tiles left  " .. table.concat(left, "  "))
     for action, v in pairs(SHIFT_ACTIONS) do
       local id = "gcb_" .. c .. "_" .. action
-      UI.setAttribute(id, "interactable", (mine and not hand) and "true" or "false")
+      local stocked = Rules.supplyLeft(State, c, Rules.gearAfterShift(r.gear, v)) > 0
+      UI.setAttribute(id, "interactable", (mine and not hand and stocked) and "true" or "false")
       UI.setAttribute(id, "color", (mine and v == Events.pendingShift) and "#05D9E8" or "#2A1B5C")
       UI.setAttribute(id, "textColor", (mine and v == Events.pendingShift) and "#000000" or "#FFFFFF")
     end
+    local canMove = Rules.supplyLeft(State, c, g) > 0 or not mine
     for action in pairs(MOVE_ACTIONS) do
-      UI.setAttribute("gcb_" .. c .. "_" .. action, "interactable", (mine and not hand) and "true" or "false")
+      UI.setAttribute("gcb_" .. c .. "_" .. action, "interactable", (mine and not hand and canMove) and "true" or "false")
     end
   end
 end

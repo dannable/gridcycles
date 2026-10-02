@@ -18,6 +18,7 @@ local function makeObj(params)
   function o.setRotation() end
   function o.setPositionSmooth(p) o.pos = p; o.returned = (o.returned or 0) + 1 end
   function o.addTag(t) o.tags[t] = true end
+  function o.createButton(b) o.button = b end
   function o.destruct() o.dead = true end
   function o.isDestroyed() return o.dead == true end
   live[#live + 1] = o
@@ -102,7 +103,7 @@ describe("TTS glue, solo (stubbed)", function()
     State.riders.Yellow.pose = { x = 0, z = 0, heading = 0 }
     State.prizms = {}
     Events.commitMove("Yellow", "straight")
-    assert_eq(count("gc_trail_Yellow"), 1)
+    assert_eq(count("gc_trail_Yellow"), 1 + 2, "wall segment + joint divider + gear plate")
     assert_eq(count("gc_rider_Yellow"), 1)
   end)
 
@@ -429,5 +430,66 @@ describe("Seat enforcement (stubbed)", function()
     for _ in pairs(Config.palette) do n = n + 1 end
     assert_eq(n, 4)
     assert_eq(#Config.seatOrder, 4)
+  end)
+end)
+
+describe("Tile labels (stubbed)", function()
+  it("each laid tile gets a divider and a plate showing its gear", function()
+    seated = { "Red" }
+    Events.newGame()
+    State.riders.Red.pose = { x = 0, z = 0, heading = 0 }
+    State.prizms = {}
+    Events.setShift("Red", 1)
+    Events.commitMove("Red", "straight")        -- G2
+    local plate
+    for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do
+      if o.name == "Red G2" then plate = o end
+    end
+    assert_true(plate ~= nil, "plate named by gear")
+    assert_eq(plate.button.label, "2")
+    assert_eq(plate.button.click_function, "gcNoop")
+    local found = false
+    for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do
+      if o.name == "Red tile joint" then found = true end
+    end
+    assert_true(found, "joint divider")
+  end)
+  it("walls are three times the old height", function()
+    assert_near(Config.tts.trailHeight, 0.36)
+  end)
+  it("rebuild after load puts the right gear on each plate", function()
+    local saved = deepcopy(State)
+    State = saved
+    Events.restore()
+    local n = 0
+    for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do
+      if o.button then n = n + 1; assert_eq(o.button.label, "2") end
+    end
+    assert_eq(n, 1)
+  end)
+end)
+
+describe("Tile supply (stubbed)", function()
+  it("a placed tile uses one from its gear; the panel shows what is left", function()
+    seated = { "Red" }
+    Events.newGame()
+    State.prizms = {}
+    Events.commitMove("Red", "straight")
+    assert_eq(State.riders.Red.supply[1], Config.tileSupply[1] - 1)
+    assert_true(uiText.gcSupply_Red:find("G1:" .. (Config.tileSupply[1] - 1)) ~= nil)
+  end)
+  it("an empty gear is refused with a private message and the turn is kept", function()
+    State.riders.Red.supply[1] = 0
+    local tiles = #State.riders.Red.trail.tiles
+    Events.commitMove("Red", "straight")
+    assert_eq(#State.riders.Red.trail.tiles, tiles)
+    assert_true(private[#private].msg:find("no G1 tiles left") ~= nil)
+    assert_eq(Rules.currentColor(State), "Red")
+  end)
+  it("shift buttons for an empty gear are disabled", function()
+    State.riders.Red.supply[2] = 0
+    UI_.refresh()
+    assert_eq(attrs["gcb_Red_shiftup.interactable"], "false")
+    assert_eq(attrs["gcb_Red_shifthold.interactable"], "false")   -- G1 is empty too
   end)
 end)

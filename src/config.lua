@@ -30,7 +30,16 @@ Config = {
     spinOutMinGear = 4,     -- ...only at this gear or higher
   },
 
-  prizm = { length = 1.5 }, -- Prizm modelled as a segment of this length
+  -- Prizm modelled as a segment of this length. A path that crosses the Prizm's
+  -- long axis within endSlack of an end still captures: set to half the wall width
+  -- (tts.trailWidth / 2) so a wall visibly touching the Prizm counts.
+  prizm = { length = 1.5, endSlack = 0.175 },
+
+  -- Tiles each rider owns per gear (shared by straight and curve). A laid tile stays
+  -- on the table until its owner crashes, which returns the whole supply. A gear with
+  -- none left can't be used; a rider with none left in any gear they can shift to
+  -- runs out of road and crashes.
+  tileSupply = { [1] = 8, [2] = 7, [3] = 6, [4] = 5, [5] = 4 },
 
   -- The bike is part of its owner's trail: a segment this long ending at the trail
   -- end (nose on the exit of the last tile, tail back over it). Other riders crash
@@ -47,7 +56,11 @@ Config = {
   tts = {
     tableY = 1.0,           -- table surface height
     trailWidth = 0.35,
-    trailHeight = 0.12,
+    dividerColor = { 0.95, 0.95, 1.0 },  -- bar across the wall at each tile joint
+    labelPlate = 0.8,        -- gear-number plate on top of each tile (size, world units)
+    labelFontSize = 400,     -- gear number text; tune in game
+    labelPlateColor = { 0.02, 0.01, 0.05 },
+    trailHeight = 0.36,      -- walls
     prizmWidth = 0.3,
     prizmHeight = 0.6,
     markerSize = 0.8,

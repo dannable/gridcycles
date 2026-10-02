@@ -5,7 +5,7 @@
 -- rollFn(n) -> integer in 1..n  (the same function rolls the d6 and picks spawn points)
 --
 -- State (plain tables, JSON-safe):
---   state = {
+--   state = {   (each rider also has supply = { [gear] = tiles left })
 --     order   = { color... },
 --     riders  = { [color] = { gear, pose = {x,z,heading}, prizms = n,
 --                             trail = { segs = {Segment...}, tiles = { {kind, gear, entry} } } } },
@@ -17,9 +17,10 @@
 -- Rules.resolveMove(state, color, move, rollFn) -> result
 --   move   = { shift = -1|0|1, kind = "straight"|"left"|"right" }
 --   result = { outcome = "placed"|"crash"|"win",
---              gear, roll, spunOut, wentStraight, kind (the tile actually laid),
+--   or outcome = "invalid" (reason = "supply": no tiles left in that gear; nothing changed)
+--              gear, tileGear (the gear of the tile laid), roll, spunOut, wentStraight, kind (the tile actually laid),
 --              segs, exitPose, captured = {prizmIds...}, spawned = {prizm...},
---              crashReason = "bounds"|"trail"|"bike" (crash only), crashOwner = colour whose
+--              crashReason = "bounds"|"trail"|"bike"|"supply" (crash only; "supply" = out of road), crashOwner = colour whose
 --              trail/marker/bike was hit (not for "bounds"), respawn = pose (crash only) }
 --
 -- A rider's bike is part of their trail: Geom.bikeSeg(rider.pose), nose on the trail
@@ -115,6 +116,27 @@ local function randomPrizm(state, rollFn)
   return prizm
 end
 
+local function fullSupply()
+  local sup = {}
+  for g = Config.gears.min, Config.gears.max do sup[g] = Config.tileSupply[g] or 0 end
+  return sup
+end
+
+-- Tiles `color` has left in `gear`.
+function Rules.supplyLeft(state, color, gear)
+  local sup = state.riders[color].supply
+  return (sup and sup[gear]) or 0
+end
+
+-- True if the rider has at least one tile in some gear they could shift to.
+local function canMoveAtAll(state, color)
+  local rider = state.riders[color]
+  for shift = -Config.gears.maxShift, Config.gears.maxShift do
+    if Rules.supplyLeft(state, color, Rules.gearAfterShift(rider.gear, shift)) > 0 then return true end
+  end
+  return false
+end
+
 function Rules.newState(colors, rollFn)
   rollFn = rollFn or function(n) return math.random(n) end
   local state = {
@@ -132,6 +154,7 @@ function Rules.newState(colors, rollFn)
       gear = Config.gears.min,
       pose = nil,
       prizms = 0,
+      supply = fullSupply(),
       trail = { segs = {}, tiles = {} },
     }
     state.riders[c].pose = randomLaunch(state, rollFn, c)
@@ -143,6 +166,20 @@ function Rules.newState(colors, rollFn)
   return state
 end
 
+-- Wipe the rider's trail (returning their whole tile supply) and respawn them.
+function Rules.crash(state, color, reason, owner, rollFn)
+  local rider = state.riders[color]
+  rider.trail = { segs = {}, tiles = {} }
+  rider.supply = fullSupply()
+  rider.gear = Config.gears.min
+  rider.pose = randomLaunch(state, rollFn, color)
+  return {
+    outcome = "crash", crashReason = reason, crashOwner = owner,
+    gear = rider.gear, captured = {}, spawned = {},
+    respawn = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading },
+  }
+end
+
 function Rules.resolveMove(state, color, move, rollFn)
   local rider = state.riders[color]
   assert(rider, "Rules.resolveMove: unknown rider " .. tostring(color))
@@ -150,6 +187,15 @@ function Rules.resolveMove(state, color, move, rollFn)
   -- 1. shift gear
   local shift = clamp(move.shift or 0, -Config.gears.maxShift, Config.gears.maxShift)
   local gear = clamp(rider.gear + shift, Config.gears.min, Config.gears.max)
+
+  -- 1b. tile supply: out of road crashes; an empty gear is just refused
+  local result
+  if not canMoveAtAll(state, color) then
+    return Rules.crash(state, color, "supply", nil, rollFn)
+  end
+  if Rules.supplyLeft(state, color, gear) <= 0 then
+    return { outcome = "invalid", reason = "supply", gear = gear, captured = {}, spawned = {} }
+  end
 
   -- 2. turn check
   local kind = move.kind
@@ -170,8 +216,8 @@ function Rules.resolveMove(state, color, move, rollFn)
 
   -- 3. geometry
   local segs, exitPose = Geom.tilePath(kind, gear, rider.pose)
-  local result = {
-    gear = gear, roll = roll, spunOut = spunOut, wentStraight = wentStraight,
+  result = {
+    gear = gear, tileGear = gear, roll = roll, spunOut = spunOut, wentStraight = wentStraight,
     kind = kind, segs = segs, exitPose = exitPose, captured = {}, spawned = {},
   }
 
@@ -188,15 +234,10 @@ function Rules.resolveMove(state, color, move, rollFn)
     end
   end
   if crashReason then
-    rider.trail = { segs = {}, tiles = {} }
-    rider.gear = Config.gears.min
-    rider.pose = randomLaunch(state, rollFn, color)
-    result.outcome = "crash"
-    result.crashReason = crashReason
-    result.crashOwner = crashOwner
-    result.gear = rider.gear
-    result.respawn = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading }
-    return result
+    local r = Rules.crash(state, color, crashReason, crashOwner, rollFn)
+    r.segs, r.exitPose, r.kind, r.tileGear = segs, exitPose, kind, gear
+    r.roll, r.spunOut, r.wentStraight = roll, spunOut, wentStraight
+    return r
   end
 
   -- 5. place tile
@@ -205,6 +246,7 @@ function Rules.resolveMove(state, color, move, rollFn)
     rider.trail.segs[#rider.trail.segs + 1] = { a = { x = s.a.x, z = s.a.z }, b = { x = s.b.x, z = s.b.z } }
   end
   rider.trail.tiles[#rider.trail.tiles + 1] = { kind = kind, gear = gear, entry = entry }
+  rider.supply[gear] = rider.supply[gear] - 1
   rider.pose = { x = exitPose.x, z = exitPose.z, heading = exitPose.heading }
   rider.gear = spunOut and Config.gears.min or gear
   result.gear = rider.gear
@@ -214,7 +256,7 @@ function Rules.resolveMove(state, color, move, rollFn)
   local remaining = {}
   local captured = {}
   for _, p in ipairs(state.prizms) do
-    if Geom.pathCrossesPrizm(segs, p) then
+    if Geom.pathCrossesPrizm(segs, p, Config.prizm.endSlack) then
       captured[#captured + 1] = p
     else
       remaining[#remaining + 1] = p
@@ -268,7 +310,8 @@ function Rules.isValidState(state)
   for _, c in ipairs(state.order) do
     local r = state.riders[c]
     if type(r) ~= "table" or type(r.pose) ~= "table" or type(r.trail) ~= "table"
-      or type(r.trail.tiles) ~= "table" or type(r.trail.segs) ~= "table" then
+      or type(r.trail.tiles) ~= "table" or type(r.trail.segs) ~= "table"
+      or type(r.supply) ~= "table" then
       return false
     end
   end
@@ -295,13 +338,14 @@ end
 
 -- Hand mode: may `color` drop a physical tile of (gear, kind) at table position
 -- pos = {x, z}? Returns true, shift on success; false, reason otherwise, where
--- reason is "over" | "turn" | "gear" | "far".
+-- reason is "over" | "turn" | "gear" | "supply" | "far".
 function Rules.validateTileDrop(state, color, gear, kind, pos)
   if state.winner then return false, "over" end
   if Rules.currentColor(state) ~= color then return false, "turn" end
   local rider = state.riders[color]
   local shift = gear - rider.gear
   if math.abs(shift) > Config.gears.maxShift then return false, "gear" end
+  if Rules.supplyLeft(state, color, gear) <= 0 then return false, "supply" end
   local center = Geom.tileCenter(kind, gear, rider.pose)
   if Geom.distance(pos, center) > Config.snapRadius then return false, "far" end
   return true, shift

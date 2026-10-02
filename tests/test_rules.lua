@@ -423,3 +423,91 @@ describe("bike as part of the trail", function()
     assert_eq(#st.riders.Blue.trail.segs, 0)
   end)
 end)
+
+describe("tile supply", function()
+  it("starts full and a placed tile uses one from its own gear", function()
+    local st = newState()
+    for g = 1, 5 do assert_eq(st.riders.Red.supply[g], Config.tileSupply[g]) end
+    local r = Rules.resolveMove(st, "Red", { shift = 1, kind = "straight" }, fixed(3))
+    assert_eq(r.tileGear, 2)
+    assert_eq(st.riders.Red.supply[2], Config.tileSupply[2] - 1)
+    assert_eq(st.riders.Red.supply[1], Config.tileSupply[1])
+  end)
+  it("a spin-out uses a tile of the gear it was laid at, not G1", function()
+    local st = newState()
+    st.riders.Red.gear = 4
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "left" }, fixed(1))
+    assert_true(r.spunOut)
+    assert_eq(r.tileGear, 4)
+    assert_eq(st.riders.Red.supply[4], Config.tileSupply[4] - 1)
+    assert_eq(st.riders.Red.gear, 1)
+  end)
+  it("an empty gear is refused and nothing changes", function()
+    local st = newState()
+    st.riders.Red.supply[1] = 0
+    local pose = { x = st.riders.Red.pose.x, z = st.riders.Red.pose.z }
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "invalid")
+    assert_eq(r.reason, "supply")
+    assert_eq(st.riders.Red.pose.z, pose.z)
+    assert_eq(#st.riders.Red.trail.tiles, 0)
+  end)
+  it("shifting to a stocked gear still works when the current one is empty", function()
+    local st = newState()
+    st.riders.Red.supply[1] = 0
+    local r = Rules.resolveMove(st, "Red", { shift = 1, kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "placed")
+    assert_eq(r.tileGear, 2)
+  end)
+  it("no tiles left in any reachable gear = out of road: crash, trail and supply reset", function()
+    local st = newState()
+    local red = st.riders.Red
+    red.supply[1], red.supply[2] = 0, 0
+    red.trail.tiles[1] = { kind = "straight", gear = 3, entry = { x = 0, z = -14, heading = 0 } }
+    red.trail.segs[1] = { a = { x = 0, z = -14 }, b = { x = 0, z = -10 } }
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "crash")
+    assert_eq(r.crashReason, "supply")
+    assert_eq(#red.trail.tiles, 0)
+    for g = 1, 5 do assert_eq(red.supply[g], Config.tileSupply[g]) end
+  end)
+  it("a normal crash gives the whole supply back", function()
+    local st = newState()
+    st.riders.Red.pose = { x = 0, z = 17, heading = 0 }
+    st.riders.Red.supply[3] = 1
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))   -- leaves the mat
+    assert_eq(r.crashReason, "bounds")
+    assert_eq(st.riders.Red.supply[3], Config.tileSupply[3])
+  end)
+  it("old saves without a supply are rejected", function()
+    local st = newState()
+    assert_true(Rules.isValidState(st))
+    st.riders.Red.supply = nil
+    assert_false(Rules.isValidState(st))
+  end)
+  it("hand mode refuses a drop of an empty gear", function()
+    local st = newState()
+    st.riders.Red.supply[1] = 0
+    local ok, why = Rules.validateTileDrop(st, "Red", 1, "straight", { x = 0, z = -9 })
+    assert_false(ok)
+    assert_eq(why, "supply")
+  end)
+end)
+
+describe("Prizm capture reach", function()
+  -- Prizm along x at z=0 from x=-0.75..0.75. A path running +z crosses at x=0.9, past the end.
+  local function crossAt(x)
+    local st = newState({ { id = 1, a = { x = -0.75, z = 0 }, b = { x = 0.75, z = 0 } } })
+    st.riders.Red.pose = { x = x, z = -1, heading = 0 }
+    return Rules.resolveMove(st, "Red", { shift = 1, kind = "straight" }, fixed(3))   -- G2: z -1 -> 2
+  end
+  it("captures when the wall's width overlaps the Prizm's end", function()
+    assert_eq(#crossAt(0.9).captured, 1, "0.15 past the end is within the wall half-width")
+  end)
+  it("does not capture when the wall clears the Prizm", function()
+    assert_eq(#crossAt(1.1).captured, 0)
+  end)
+  it("still captures a centred crossing", function()
+    assert_eq(#crossAt(0).captured, 1)
+  end)
+end)

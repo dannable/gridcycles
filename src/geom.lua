@@ -115,9 +115,18 @@ end
 
 -- True if the path fully crosses the Prizm's long axis (prizmSeg): the path must
 -- pass from one side of the axis to the other, at a point on the Prizm.
--- Touching or ending on the axis does not count.
-function Geom.pathCrossesPrizm(newSegs, prizmSeg)
+-- Touching or ending on the axis does not count. `slack` (default 0) extends the
+-- axis at both ends for the "crossing is on the Prizm" test, so a wall that overlaps
+-- an end of the Prizm counts (see Config.prizm.endSlack).
+function Geom.pathCrossesPrizm(newSegs, prizmSeg, slack)
   local pa, pb = prizmSeg.a, prizmSeg.b
+  if slack and slack > 0 then
+    local dx, dz = pb.x - pa.x, pb.z - pa.z
+    local len = math.sqrt(dx * dx + dz * dz)
+    local ux, uz = dx / len * slack, dz / len * slack
+    pa = { x = pa.x - ux, z = pa.z - uz }
+    pb = { x = pb.x + ux, z = pb.z + uz }
+  end
   -- polyline vertices
   local pts = { newSegs[1].a }
   for _, s in ipairs(newSegs) do pts[#pts + 1] = s.b end

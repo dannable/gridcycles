@@ -187,7 +187,8 @@ local function describe(color, move, r)
   end
   if r.outcome == "crash" then
     local why = r.crashReason
-    if r.crashReason == "bike" then why = "hit " .. r.crashOwner .. "'s bike" end
+    if r.crashReason == "bike" then why = "hit " .. r.crashOwner .. "'s bike"
+    elseif r.crashReason == "supply" then why = "out of road, no tiles left" end
     parts[#parts + 1] = "CRASH (" .. why .. "), respawning"
   end
   if #r.captured > 0 then
@@ -204,7 +205,7 @@ local function apply(color, r)
     Spawn.rider(color, r.respawn)
     return
   end
-  Spawn.tile(color, r.segs)
+  Spawn.tile(color, r.segs, r.tileGear)
   Spawn.rider(color, r.exitPose)
   for _, id in ipairs(r.captured) do Spawn.removePrizm(id) end
   local first = #State.markers - #r.captured + 1
@@ -219,8 +220,13 @@ function Events.commitMove(playerColor, kind)
   if not mayAct(playerColor) then return end
   local color = playerColor
   local move = { shift = Events.pendingShift, kind = kind }
-  Events.pendingShift = 0
   local r = Rules.resolveMove(State, color, move, rollFn)
+  if r.outcome ~= "invalid" then Events.pendingShift = 0 end
+  if r.outcome == "invalid" then      -- no tiles in that gear: nothing happened, still their turn
+    printToColor("You have no G" .. r.gear .. " tiles left. Pick another gear.", color, { 1, 1, 1 })
+    UI_.refresh()
+    return
+  end
   apply(color, r)
   say(describe(color, move, r), rgb(color))
   if r.outcome == "win" then
@@ -243,6 +249,7 @@ local DROP_MESSAGES = {
   turn = "It isn't your turn.",
   over = "The game is over.",
   gear = "That tile is more than %d gear(s) from your current gear (G%d).",
+  supply = "You have no tiles of that gear left.",
   far  = "Drop the tile closer to where your trail ends.",
 }
 

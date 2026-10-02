@@ -43,6 +43,18 @@ local function place(params, color, groupTag)
       o.addTag(VISUAL_TAG)
       o.addTag(groupTag)
       if params.name then o.setName(params.name) end
+      if params.label then
+        -- flat text on the object's top face; the button is scaled to undo the
+        -- object's own (non-uniform) scale so the digit isn't stretched
+        local sc = params.scale
+        o.createButton({
+          click_function = "gcNoop", function_owner = Global,
+          label = params.label.text, font_color = tint(params.label.color), color = { 0, 0, 0, 0 },
+          position = { 0, 0.6, 0 }, rotation = { 0, 0, 0 },
+          scale = { 1 / sc[1], 1, 1 / sc[3] },
+          width = 0, height = 0, font_size = Config.tts.labelFontSize,
+        })
+      end
     end,
   })
   register(obj, groupTag)
@@ -84,10 +96,31 @@ function Spawn.trailSegment(seg, color, groupTag)
   }, Config.palette[color], groupTag)
 end
 
-function Spawn.tile(color, segs)
+-- One laid tile: its wall segments, a pale divider bar across the wall at the joint
+-- where it starts, and a plate on top showing its gear. The plate keeps a fixed
+-- orientation (not rotated with the trail) so the digit reads the same everywhere.
+function Spawn.tile(color, segs, gear)
+  local t = Config.tts
+  local group = "gc_trail_" .. color
   for _, s in ipairs(segs) do
-    Spawn.trailSegment(s, color, "gc_trail_" .. color)
+    Spawn.trailSegment(s, color, group)
   end
+  local top = t.tableY + t.matThickness + t.trailHeight
+  local first = Geom.segmentPose(segs[1])
+  place({
+    position = { segs[1].a.x, t.tableY + t.matThickness + t.trailHeight * 0.55, segs[1].a.z },
+    rotation = { 0, first.heading, 0 },
+    scale = { t.trailWidth * 2.4, t.trailHeight * 1.1, 0.07 },
+    name = color .. " tile joint",
+  }, t.dividerColor, group)
+  local mid = Geom.segmentPose(segs[math.ceil(#segs / 2)])
+  local plate = t.labelPlate
+  place({
+    position = { mid.x, top + 0.02, mid.z },
+    scale = { plate, 0.04, plate },
+    name = color .. " G" .. tostring(gear),
+    label = { text = tostring(gear), color = Config.palette[color] },
+  }, t.labelPlateColor, group)
 end
 
 function Spawn.prizm(prizm)
@@ -174,6 +207,9 @@ end
 function Spawn.clearTrail(color)
   Spawn.clearGroup("gc_trail_" .. color)
 end
+
+-- Click target for the gear-number labels; they are not buttons, but TTS wants a function.
+function gcNoop() end
 
 -- Hand mode ---------------------------------------------------------------
 -- Each rider gets a tray: one locked slab plus 15 draggable tiles
@@ -265,7 +301,7 @@ function Spawn.rebuild(state)
     for _, tile in ipairs(r.trail.tiles) do
       -- tiles hold their entry pose + kind; segments are recomputed, not stored per tile
       local segs = Geom.tilePath(tile.kind, tile.gear, tile.entry)
-      Spawn.tile(color, segs)
+      Spawn.tile(color, segs, tile.gear)
     end
     Spawn.rider(color, r.pose)
   end
