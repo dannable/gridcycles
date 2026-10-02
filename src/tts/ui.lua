@@ -11,7 +11,11 @@ UI_ = {}  -- UI is a reserved TTS global; use UI_ for our helpers
 
 local SHIFT_NAMES = { [-1] = "down", [0] = "hold", [1] = "up" }
 local SHIFT_ACTIONS = { shiftdown = -1, shifthold = 0, shiftup = 1 }
-local MOVE_ACTIONS = { left = "left", straight = "straight", right = "right" }
+-- action -> { kind, curve }
+local MOVE_ACTIONS = {
+  hardleft = { "left", "hard" }, softleft = { "left", "soft" }, straight = { "straight" },
+  softright = { "right", "soft" }, hardright = { "right", "hard" },
+}
 
 local LOG_LINES = 7
 local logLines = {}
@@ -81,20 +85,23 @@ local function riderXml(color)
     return button("gcb_" .. color .. "_" .. action, label, bg, fg)
   end
   return string.format([[
-<Panel id="gcPanel_%s" active="false" visibility="%s" width="470" height="274" rectAlignment="LowerCenter"
+<Panel id="gcPanel_%s" active="false" visibility="%s" width="520" height="372" rectAlignment="LowerCenter"
        offsetXY="0 20" color="#0A0618E6" padding="10 10 10 10">
-  <VerticalLayout spacing="6">
-    <Text id="gcGear_%s" fontSize="22" color="%s" alignment="MiddleCenter" fontStyle="Bold" preferredHeight="32"></Text>
+  <VerticalLayout spacing="5">
+    <Text id="gcGear_%s" fontSize="22" color="%s" alignment="MiddleCenter" fontStyle="Bold" preferredHeight="30"></Text>
     <Text id="gcOdds_%s" fontSize="14" color="#D9C8FF" alignment="MiddleCenter" preferredHeight="22"></Text>
-    <Text id="gcSupply_%s" fontSize="13" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="20"></Text>
+    <Text fontSize="12" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="16">YOUR TEMPLATES LEFT (shape: soft / hard curves)</Text>
+    <Text id="gcSupply_%s" fontSize="13" color="#FFFFFF" alignment="MiddleCenter" preferredHeight="88"></Text>
+    <Text id="gcWarn_%s" fontSize="12" color="#FFB000" alignment="MiddleCenter" preferredHeight="34"></Text>
     <Text fontSize="12" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="16">1. choose a shift (optional)</Text>
-    <HorizontalLayout spacing="8">%s%s%s</HorizontalLayout>
+    <HorizontalLayout spacing="8" preferredHeight="34">%s%s%s</HorizontalLayout>
     <Text fontSize="12" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="16">2. commit your move (no take-backs)</Text>
-    <HorizontalLayout spacing="8">%s%s%s</HorizontalLayout>
+    <HorizontalLayout spacing="6" preferredHeight="38">%s%s%s%s%s</HorizontalLayout>
   </VerticalLayout>
-</Panel>]], color, color, color, h, color, color,
+</Panel>]], color, color, color, h, color, color, color,
     b("shiftdown", "Shift down", "#2A1B5C"), b("shifthold", "Hold", "#2A1B5C"), b("shiftup", "Shift up", "#2A1B5C"),
-    b("left", "Curve L", h, "#000000"), b("straight", "Straight", h, "#000000"), b("right", "Curve R", h, "#000000"))
+    b("hardleft", "Hard L", h, "#000000"), b("softleft", "Soft L", h, "#000000"), b("straight", "Straight", h, "#000000"),
+    b("softright", "Soft R", h, "#000000"), b("hardright", "Hard R", h, "#000000"))
 end
 
 -- Whole-UI XML. colors = riders in the current game (empty in the lobby).
@@ -132,6 +139,24 @@ end
 
 function UI_.clearLog()
   logLines = {}
+end
+
+-- Warn the rider if a move at `gear` would not get the exact piece asked for.
+function UI_.substitutionNote(state, color, gear)
+  local rider = state.riders[color]
+  local notes = {}
+  for _, req in ipairs({ { "straight", "straight", "Straight" }, { "curve", "soft", "Soft curve" },
+                         { "curve", "hard", "Hard curve" } }) do
+    local pg, ps, removed = Rules.planPiece(rider, req[1], req[2], gear)
+    if pg == nil then
+      notes[#notes + 1] = req[3] .. ": no tile available"
+    elseif removed > 0 then
+      notes[#notes + 1] = req[3] .. ": none left, your " .. removed .. " oldest tile(s) would come off"
+    elseif pg ~= gear or (req[1] == "curve" and ps ~= req[2]) then
+      notes[#notes + 1] = req[3] .. ": would use a G" .. pg .. " " .. ps
+    end
+  end
+  return table.concat(notes, "\n")
 end
 
 function UI_.refresh()
@@ -179,26 +204,30 @@ function UI_.refresh()
         Rules.gearAfterShift(r.gear, -1), Rules.gearAfterShift(r.gear, 1)))
     else
       local ok, spin = Rules.curveOdds(g)
-      local txt = string.format("After shift: G%d (%s). Curve success %d%%", g, SHIFT_NAMES[shift],
-        math.floor(ok * 100 + 0.5))
-      if spin > 0 then txt = txt .. ", spin-out " .. math.floor(spin * 100 + 0.5) .. "%" end
+      local txt = string.format("After shift: G%d (%s). Curve success %d%%, spin-out %d%%", g, SHIFT_NAMES[shift],
+        math.floor(ok * 100 + 0.5), math.floor(spin * 100 + 0.5))
       UI.setValue("gcOdds_" .. c, txt)
     end
-    local left = {}
+    -- templates left, one line per gear; '>' marks the gear you'll be in after the shift
+    local lines = {}
     for gr = Config.gears.min, Config.gears.max do
-      left[#left + 1] = string.format("G%d:%d", gr, Rules.supplyLeft(State, c, gr))
+      local function cell(shape, name)
+        if (Config.tileSupply[gr] or {})[shape] == nil then return name .. " -" end
+        return string.format("%s %d", name, Rules.supplyLeft(State, c, gr, shape))
+      end
+      lines[#lines + 1] = string.format("%s G%d   %s   %s   %s", gr == g and ">" or " ", gr,
+        cell("straight", "Straight"), cell("soft", "Soft"), cell("hard", "Hard"))
     end
-    UI.setValue("gcSupply_" .. c, "Tiles left  " .. table.concat(left, "  "))
+    UI.setValue("gcSupply_" .. c, table.concat(lines, "\n"))
+    UI.setValue("gcWarn_" .. c, mine and not State.winner and UI_.substitutionNote(State, c, g) or "")
     for action, v in pairs(SHIFT_ACTIONS) do
       local id = "gcb_" .. c .. "_" .. action
-      local stocked = Rules.supplyLeft(State, c, Rules.gearAfterShift(r.gear, v)) > 0
-      UI.setAttribute(id, "interactable", (mine and not hand and stocked) and "true" or "false")
+      UI.setAttribute(id, "interactable", (mine and not hand) and "true" or "false")
       UI.setAttribute(id, "color", (mine and v == Events.pendingShift) and "#05D9E8" or "#2A1B5C")
       UI.setAttribute(id, "textColor", (mine and v == Events.pendingShift) and "#000000" or "#FFFFFF")
     end
-    local canMove = Rules.supplyLeft(State, c, g) > 0 or not mine
     for action in pairs(MOVE_ACTIONS) do
-      UI.setAttribute("gcb_" .. c .. "_" .. action, "interactable", (mine and not hand and canMove) and "true" or "false")
+      UI.setAttribute("gcb_" .. c .. "_" .. action, "interactable", (mine and not hand) and "true" or "false")
     end
   end
 end
@@ -222,6 +251,6 @@ function UI_.handle(player, id)
   if SHIFT_ACTIONS[action] ~= nil then
     Events.setShift(player.color, SHIFT_ACTIONS[action])
   elseif MOVE_ACTIONS[action] then
-    Events.commitMove(player.color, MOVE_ACTIONS[action])
+    Events.commitMove(player.color, MOVE_ACTIONS[action][1], MOVE_ACTIONS[action][2])
   end
 end

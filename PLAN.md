@@ -21,9 +21,10 @@ Name: **Gridcycles**. It's an original reskin inspired by *Lazer Ryderz* (Greate
 | Win | First to **3 Prizms** wins. |
 | Setup | Prizms are scattered at random across the play mat. Each rider gets a random launch point and heading on the mat edge (bike tail on the edge) (this replaces the original's "eyes-closed edge placement"). |
 | Speed | 5 gears. At the start of your turn, shift up 1, down 1 or hold. Each gear has its own tile length (G1 shortest, G5 longest). |
-| Tiles | Each rider owns a limited supply per gear (`Config.tileSupply`, shared by straight and curve). A laid tile stays out until you crash, which returns them all. You can't use a gear you're out of. No tiles left in any gear you can shift to = **out of road**, a crash. |
-| Move | Choose **Straight**, **Curve L** or **Curve R** at your current gear. The tile attaches to your trail end. |
-| Turn check | A curve needs **d6 ≥ gear**. If you fail, you go straight instead. **Spin-out** (natural 1 at G4+, configurable): the curve happens, but your gear drops to G1. |
+| Tiles | Each rider owns a limited set of pieces: per gear, 2 straights, 2 soft curves and 2 hard curves, except gear 4 (no hard curves) and gear 5 (straights only). See `Config.tileSupply`. Laid tiles stay out until the rider crashes, which returns everything. |
+| Out of pieces | If the exact piece is gone, use the same kind from the next gear down (a curve tries the other curve shape in the same gear first). If nothing at your gear or below is left, your **oldest tiles come off the line one at a time** until a piece fits. Your gear is unchanged. |
+| Move | Choose **Straight**, or a **soft** or **hard** curve to the left or right, at your current gear. The tile attaches to your trail end. |
+| Turn check | The curve die has faces 1, 2, 3, 4, 5 and a spin-out face. A numbered face **≥ your gear** succeeds (place the curve); a lower one fails (place a straight instead). The **spin-out** face (1 in 6, any gear) places the curve, then drops you to G1. |
 | Crash | If your new tile crosses any trail, **any rider's bike**, or leaves the mat, you crash. A bike is part of its owner's trail: it sits on the end of their last tile, nose on the trail end, and never blocks its owner. Your trail is removed, you respawn at a new random edge point at G1, and you keep your captured Prizms. |
 | Capture | If your tile fully crosses a Prizm's long axis (within half a wall width of its ends), you capture it. Your colour marker takes its place, which blocks it like a trail. A new Prizm then spawns at a random free spot. |
 | Riders | 4 original riders, each with one ability (see §6). |
@@ -166,3 +167,20 @@ M1 is the risk spike, so do it first. If arc collisions are solid, everything el
 ## 9. Possible remix modes (post-v1)
 
 Team mode (2v2, allies can cross each other's trails), Prizm relay (carry a Prizm to your base), timed-turn blitz, 6-player large mat.
+
+## 10. Rules backlog (from comparing with the tabletop game's published rules)
+
+Done: typed, limited pieces; substitution and oldest-tile removal; the curve die (spin-out face).
+
+Not yet matching, roughly by impact on play:
+
+1. **Crash victim loses pieces.** Whoever you crash into loses the hit piece and every piece older than it (back to their launch point); their front piece stays. We only clear the crasher.
+2. **Turn order by gear.** Each round the fastest rider goes first (ties broken by a rotating marker). We use fixed seat order.
+3. **Prizm stealing and win condition.** Scored Prizms stay on the table in the scorer's colour and can be converted by another rider crossing them. The win is three in your colour *on the table at once*. We count captures forever and never lose one. A scored Prizm sits on the scoring tile, and riders can pass through it (no crash where a Prizm sits on an opponent's line).
+4. **Prizm count and replacement.** One neutral Prizm per player, placed centrally at the start; scoring a neutral one tosses a new neutral onto the table. We scatter 5 at random.
+5. **Nudge and locked Prizms.** A tile that overlaps an unscored Prizm without scoring pushes it clear (one wall width). Prizms touched by two colours, or scored ones on their owner's line, are locked.
+6. **Respawn gear.** After a crash you choose any starting gear; we force G1. Initial gears are chosen blind and equal picks stall to G1; we start everyone at G1.
+7. **Launch point is a wall piece**, and start positions are placed blind. Ours is a random edge point.
+8. **Scoring across two turns.** A line that stops partway over a Prizm can finish scoring next turn; ours checks only the newly laid tile.
+9. **Power Prizms.** Per-rider one-shot powers, recharged when someone steals one of your Prizms (needs #3).
+10. Table-size variants (small: no gear 5/4-soft/3-hard; large: bonus G5 straight at launch).

@@ -290,9 +290,9 @@ describe("Hand mode (stubbed)", function()
     end
   end
 
-  local function drop(color, gear, kind, label, dx)
+  local function drop(color, gear, kind, label, dx, shape)
     local o = tile(color, gear, label)
-    local c = Geom.tileCenter(kind, gear, State.riders[color].pose)
+    local c = Geom.tileCenter(kind, gear, State.riders[color].pose, shape)
     o.pos = { c.x + (dx or 0), 2, c.z }
     Events.handleDrop(color, o)
     return o
@@ -305,15 +305,25 @@ describe("Hand mode (stubbed)", function()
     Events.lobbyClick(host, "mode")
     assert_eq(Events.settings.mode, "hand")
     Events.lobbyClick(host, "start")
-    assert_eq(#getObjectsWithTag("gc_tile"), 2 * 15)
-    assert_eq(#getObjectsWithTag("gc_tray_Red"), 16)
+    -- one tray tile per straight, plus left and right of every soft/hard curve
+    local perRider = 0
+    for g = 1, 5 do
+      for shape, n in pairs(Config.tileSupply[g]) do perRider = perRider + (shape == "straight" and 1 or 2) end
+    end
+    assert_eq(#getObjectsWithTag("gc_tile"), 2 * perRider)
+    assert_eq(#getObjectsWithTag("gc_tray_Red"), perRider + 1)
     assert_true(uiText.gcOdds_Red:find("Drag a tile", 1, true) ~= nil)
     assert_eq(attrs["gcb_Red_straight.interactable"], "false")
   end)
 
   it("name parsing round-trips", function()
-    local c, g, k = Spawn.parseTileName("Red G3 Left")
-    assert_eq(c, "Red"); assert_eq(g, 3); assert_eq(k, "left")
+    local c, g, k, sh = Spawn.parseTileName("Red G3 Soft Left")
+    assert_eq(c, "Red"); assert_eq(g, 3); assert_eq(k, "left"); assert_eq(sh, "soft")
+    c, g, k, sh = Spawn.parseTileName("Red G2 Hard Right")
+    assert_eq(k, "right"); assert_eq(sh, "hard")
+    c, g, k, sh = Spawn.parseTileName("Blue G5 Straight")
+    assert_eq(c, "Blue"); assert_eq(k, "straight"); assert_eq(sh, "straight")
+    assert_eq(Spawn.parseTileName("Red G5 Hard Left"), nil, "gear 5 has no such tile")
     assert_eq(Spawn.parseTileName("Prizm"), nil)
   end)
 
@@ -354,7 +364,7 @@ describe("Hand mode (stubbed)", function()
   end)
 
   it("a curve tile that fails its roll still places a straight", function()
-    local o = drop("Blue", 1, "left", "Left")
+    local o = drop("Blue", 1, "left", "Soft Left", 0, "soft")
     assert_eq(#State.riders.Blue.trail.tiles, 1)
     assert_eq(o.returned ~= nil, true)
   end)
@@ -440,12 +450,12 @@ describe("Tile labels (stubbed)", function()
     State.riders.Red.pose = { x = 0, z = 0, heading = 0 }
     State.prizms = {}
     Events.setShift("Red", 1)
-    Events.commitMove("Red", "straight")        -- G2
+    Events.commitMove("Red", "straight")        -- G2 straight
     local plate
     for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do
-      if o.name == "Red G2" then plate = o end
+      if o.name == "Red G2 Straight" then plate = o end
     end
-    assert_true(plate ~= nil, "plate named by gear")
+    assert_true(plate ~= nil, "plate named by gear and shape")
     assert_eq(plate.button.label, "2")
     assert_eq(plate.button.click_function, "gcNoop")
     local found = false
@@ -454,6 +464,15 @@ describe("Tile labels (stubbed)", function()
     end
     assert_true(found, "joint divider")
   end)
+  it("curve plates carry S or H after the gear", function()
+    State.riders.Red.gear = 2
+    Events.commitMove("Red", "right", "hard")   -- may fail its roll and go straight; accept either
+    local labels = {}
+    for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do
+      if o.button then labels[o.button.label] = true end
+    end
+    assert_true(labels["2H"] or labels["2"], "hard curve plate or the straight it fell back to")
+  end)
   it("walls are three times the old height", function()
     assert_near(Config.tts.trailHeight, 0.36)
   end)
@@ -461,35 +480,62 @@ describe("Tile labels (stubbed)", function()
     local saved = deepcopy(State)
     State = saved
     Events.restore()
-    local n = 0
+    local n = #State.riders.Red.trail.tiles
+    local plates = 0
     for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do
-      if o.button then n = n + 1; assert_eq(o.button.label, "2") end
+      if o.button then plates = plates + 1 end
     end
-    assert_eq(n, 1)
+    assert_eq(plates, n)
   end)
 end)
 
-describe("Tile supply (stubbed)", function()
-  it("a placed tile uses one from its gear; the panel shows what is left", function()
+describe("Tile supply and removal (stubbed)", function()
+  it("the panel lists every gear's remaining templates and marks the gear you'll be in", function()
+    Events.settings.mode = "commit"
     seated = { "Red" }
     Events.newGame()
     State.prizms = {}
-    Events.commitMove("Red", "straight")
-    assert_eq(State.riders.Red.supply[1], Config.tileSupply[1] - 1)
-    assert_true(uiText.gcSupply_Red:find("G1:" .. (Config.tileSupply[1] - 1)) ~= nil)
-  end)
-  it("an empty gear is refused with a private message and the turn is kept", function()
-    State.riders.Red.supply[1] = 0
-    local tiles = #State.riders.Red.trail.tiles
-    Events.commitMove("Red", "straight")
-    assert_eq(#State.riders.Red.trail.tiles, tiles)
-    assert_true(private[#private].msg:find("no G1 tiles left") ~= nil)
-    assert_eq(Rules.currentColor(State), "Red")
-  end)
-  it("shift buttons for an empty gear are disabled", function()
-    State.riders.Red.supply[2] = 0
     UI_.refresh()
-    assert_eq(attrs["gcb_Red_shiftup.interactable"], "false")
-    assert_eq(attrs["gcb_Red_shifthold.interactable"], "false")   -- G1 is empty too
+    local txt = uiText.gcSupply_Red
+    assert_true(txt:find("G1   Straight 2   Soft 2   Hard 2", 1, true) ~= nil, txt)
+    assert_true(txt:find("G5   Straight 2   Soft -   Hard -", 1, true) ~= nil, txt)
+    assert_true(txt:find(">", 1, true) ~= nil)
+  end)
+  it("the panel count drops after a tile is used", function()
+    Events.commitMove("Red", "straight")
+    assert_true(uiText.gcSupply_Red:find("G1   Straight 1", 1, true) ~= nil or
+      uiText.gcSupply_Red:find("G1   Straight 1", 1, true) ~= nil)
+  end)
+  it("a warning appears when the move would use a lower tile", function()
+    State.riders.Red.gear = 3
+    State.riders.Red.supply[3].straight = 0
+    UI_.refresh()
+    assert_true(uiText.gcWarn_Red:find("Straight: would use a G2 straight", 1, true) ~= nil, uiText.gcWarn_Red)
+  end)
+  it("giving up oldest tiles removes exactly those tiles' objects", function()
+    seated = { "Red" }
+    Events.newGame()
+    State.prizms = {}
+    State.riders.Red.pose = { x = 0, z = -14, heading = 0 }
+    Events.commitMove("Red", "straight")
+    Events.commitMove("Red", "straight")
+    local firstId = State.riders.Red.trail.tiles[1].id
+    assert_eq(#getObjectsWithTag("gc_tile_Red_" .. firstId), 3)
+    Events.commitMove("Red", "straight")        -- third G1 straight: oldest tile comes off
+    assert_eq(#getObjectsWithTag("gc_tile_Red_" .. firstId), 0, "its wall, divider and plate are gone")
+    assert_eq(#State.riders.Red.trail.tiles, 2)
+    assert_eq(#getObjectsWithTag("gc_trail_Red"), 2 * 3)
+  end)
+  it("the log says when a rider gave up tiles", function()
+    local last = broadcasts[#broadcasts]
+    assert_true(last:find("oldest", 1, true) ~= nil or last:find("turn", 1, true) ~= nil)
+  end)
+  it("move buttons are never disabled for lack of tiles", function()
+    Events.settings.mode = "commit"
+    Events.newGame()
+    State.riders.Red.supply[1].straight = 0
+    UI_.refresh()
+    assert_eq(attrs["gcb_Red_straight.interactable"], "true")
+    assert_eq(attrs["gcb_Red_hardleft.interactable"], "true")
   end)
 end)

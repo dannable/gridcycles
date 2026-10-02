@@ -12,34 +12,42 @@ Config = {
 
   gears = { min = 1, max = 5, maxShift = 1 },
 
-  -- Tile geometry per gear: straight length, curve radius, curve sweep
+  -- Tile geometry per gear: straight length, and for each curve shape its radius and
+  -- sweep. "soft" is the gentle curve, "hard" the tight one. A shape missing here
+  -- (and in tileSupply) doesn't exist at that gear: high gears can't turn sharply.
   tiles = {
-    [1] = { straight = 2.0, radius = 2.0, sweep = 45 },
-    [2] = { straight = 3.0, radius = 3.0, sweep = 45 },
-    [3] = { straight = 4.0, radius = 4.0, sweep = 45 },
-    [4] = { straight = 5.0, radius = 5.0, sweep = 45 },
-    [5] = { straight = 6.0, radius = 6.0, sweep = 45 },
+    [1] = { straight = 2.0, soft = { radius = 2.0, sweep = 45 }, hard = { radius = 1.0, sweep = 90 } },
+    [2] = { straight = 3.0, soft = { radius = 3.0, sweep = 45 }, hard = { radius = 1.5, sweep = 90 } },
+    [3] = { straight = 4.0, soft = { radius = 4.0, sweep = 45 }, hard = { radius = 2.0, sweep = 90 } },
+    [4] = { straight = 5.0, soft = { radius = 5.0, sweep = 45 } },
+    [5] = { straight = 6.0 },
+  },
+
+  -- Pieces ("templates") each rider owns, per gear and shape. A laid tile stays on
+  -- the table until its owner crashes (everything comes back) or has to give up their
+  -- oldest tiles (see Rules.resolveMove). Shapes: "straight" | "soft" | "hard".
+  tileSupply = {
+    [1] = { straight = 2, soft = 2, hard = 2 },
+    [2] = { straight = 2, soft = 2, hard = 2 },
+    [3] = { straight = 2, soft = 2, hard = 2 },
+    [4] = { straight = 2, soft = 2 },
+    [5] = { straight = 2 },
   },
 
   arcSegments = 8,          -- polyline resolution for curves
   epsilon = 1e-6,           -- geometry tolerance
 
+  -- The curve die has faces 1..die-1 plus one spin-out face (the highest, `die`).
+  -- A curve succeeds on a numbered face >= your gear, fails (goes straight) on a
+  -- lower one, and the spin-out face curves but drops you to gear 1, at any gear.
   turnCheck = {
-    die = 6,                -- curve succeeds if roll >= gear
-    spinOutRoll = 1,        -- natural roll that triggers spin-out...
-    spinOutMinGear = 4,     -- ...only at this gear or higher
+    die = 6,
   },
 
   -- Prizm modelled as a segment of this length. A path that crosses the Prizm's
   -- long axis within endSlack of an end still captures: set to half the wall width
   -- (tts.trailWidth / 2) so a wall visibly touching the Prizm counts.
   prizm = { length = 1.5, endSlack = 0.175 },
-
-  -- Tiles each rider owns per gear (shared by straight and curve). A laid tile stays
-  -- on the table until its owner crashes, which returns the whole supply. A gear with
-  -- none left can't be used; a rider with none left in any gear they can shift to
-  -- runs out of road and crashes.
-  tileSupply = { [1] = 8, [2] = 7, [3] = 6, [4] = 5, [5] = 4 },
 
   -- The bike is part of its owner's trail: a segment this long ending at the trail
   -- end (nose on the exit of the last tile, tail back over it). Other riders crash
@@ -69,7 +77,7 @@ Config = {
     matColor = { 0.03, 0.02, 0.08 },
     tileWidth = 0.9,         -- hand-mode tray tiles
     tileHeight = 0.2,
-    trayGap = 2.4,           -- spacing between tray slots (x)
+    trayGap = 1.85,          -- spacing between tray slots (x)
     trayRowDepth = 8,        -- spacing between riders' tray rows (z)
     trayOffset = 6,          -- first tray row sits this far beyond the mat's south edge
     -- Custom rider mesh (assets/models/bike.obj + bike.png, uploaded somewhere public).

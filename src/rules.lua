@@ -5,23 +5,32 @@
 -- rollFn(n) -> integer in 1..n  (the same function rolls the d6 and picks spawn points)
 --
 -- State (plain tables, JSON-safe):
---   state = {   (each rider also has supply = { [gear] = tiles left })
+--   state = {
 --     order   = { color... },
 --     riders  = { [color] = { gear, pose = {x,z,heading}, prizms = n,
---                             trail = { segs = {Segment...}, tiles = { {kind, gear, entry} } } } },
+--                             supply = { [gear] = { straight = n, soft = n, hard = n } },
+--                             nextTileId = n,
+--                             trail = { segs = {Segment...},
+--                                       tiles = { {id, kind, shape, gear, entry} ... } } } },  -- oldest first
 --     prizms  = { { id, a = Point, b = Point } ... },
 --     markers = { { owner = color, segs = { Segment } } ... },   -- capture markers, block like trails
 --     nextPrizmId = n,
 --   }
 --
+-- Pieces: every tile has a gear and a shape ("straight" | "soft" | "hard"); riders own a
+-- limited supply of each (Config.tileSupply). See Rules.planPiece for what happens
+-- when the wanted piece has run out.
+--
 -- Rules.resolveMove(state, color, move, rollFn) -> result
---   move   = { shift = -1|0|1, kind = "straight"|"left"|"right" }
+--   move   = { shift = -1|0|1, kind = "straight"|"left"|"right", curve = "soft"|"hard" }
 --   result = { outcome = "placed"|"crash"|"win",
---   or outcome = "invalid" (reason = "supply": no tiles left in that gear; nothing changed)
---              gear, tileGear (the gear of the tile laid), roll, spunOut, wentStraight, kind (the tile actually laid),
+--              gear (rider's gear afterwards), roll, spunOut, wentStraight,
+--              kind (the tile actually laid), tileGear / shape (the piece used),
+--              substituted (true if a lower gear or other curve shape was used),
+--              removedTiles = { id... } (oldest tiles given up to get a piece),
 --              segs, exitPose, captured = {prizmIds...}, spawned = {prizm...},
---              crashReason = "bounds"|"trail"|"bike"|"supply" (crash only; "supply" = out of road), crashOwner = colour whose
---              trail/marker/bike was hit (not for "bounds"), respawn = pose (crash only) }
+--              crashReason = "bounds"|"trail"|"bike"|"supply" (crash only), crashOwner = colour
+--              whose trail/marker/bike was hit (not for "bounds"), respawn = pose (crash only) }
 --
 -- A rider's bike is part of their trail: Geom.bikeSeg(rider.pose), nose on the trail
 -- end. It blocks every other rider but never its owner.
@@ -118,23 +127,79 @@ end
 
 local function fullSupply()
   local sup = {}
-  for g = Config.gears.min, Config.gears.max do sup[g] = Config.tileSupply[g] or 0 end
+  for g = Config.gears.min, Config.gears.max do
+    sup[g] = {}
+    for shape, n in pairs(Config.tileSupply[g] or {}) do sup[g][shape] = n end
+  end
   return sup
 end
 
--- Tiles `color` has left in `gear`.
-function Rules.supplyLeft(state, color, gear)
-  local sup = state.riders[color].supply
-  return (sup and sup[gear]) or 0
+-- Pieces `color` has left of (gear, shape).
+function Rules.supplyLeft(state, color, gear, shape)
+  local row = state.riders[color].supply[gear]
+  return (row and row[shape]) or 0
 end
 
--- True if the rider has at least one tile in some gear they could shift to.
-local function canMoveAtAll(state, color)
-  local rider = state.riders[color]
-  for shift = -Config.gears.maxShift, Config.gears.maxShift do
-    if Rules.supplyLeft(state, color, Rules.gearAfterShift(rider.gear, shift)) > 0 then return true end
+local function otherShape(shape) return shape == "soft" and "hard" or "soft" end
+
+-- Preference order for a request: from the current gear downwards; a curve prefers
+-- the shape asked for, then the other curve shape, before dropping a gear.
+local function candidates(want, shape, gear)
+  local list = {}
+  for g = gear, Config.gears.min, -1 do
+    if want == "straight" then
+      list[#list + 1] = { g, "straight" }
+    else
+      list[#list + 1] = { g, shape }
+      list[#list + 1] = { g, otherShape(shape) }
+    end
   end
-  return false
+  return list
+end
+
+-- Which piece would a rider use? want = "straight" | "curve"; shape = "soft" | "hard"
+-- (curves); gear = their gear. Uses the exact piece if they have one, else the same
+-- kind from the next gear down (a curve tries the other curve shape in the same gear
+-- first). If nothing at their gear or below is left, their oldest tiles come off the
+-- line one at a time until something fits.
+-- Returns pieceGear, pieceShape, removeCount (how many oldest tiles must go), or nil
+-- if even an empty line can't supply one. Does not change the rider.
+function Rules.planPiece(rider, want, shape, gear)
+  local sup = {}
+  for g, row in pairs(rider.supply) do
+    sup[g] = {}
+    for sh, n in pairs(row) do sup[g][sh] = n end
+  end
+  local removed = 0
+  while true do
+    for _, c in ipairs(candidates(want, shape, gear)) do
+      if ((sup[c[1]] and sup[c[1]][c[2]]) or 0) > 0 then return c[1], c[2], removed end
+    end
+    removed = removed + 1
+    local tile = rider.trail.tiles[removed]
+    if tile == nil then return nil, nil, removed - 1 end
+    sup[tile.gear][tile.shape] = (sup[tile.gear][tile.shape] or 0) + 1
+  end
+end
+
+local function segsOf(tiles)
+  local segs = {}
+  for _, t in ipairs(tiles) do
+    for _, sg in ipairs((Geom.tilePath(t.kind, t.gear, t.entry, t.shape))) do segs[#segs + 1] = sg end
+  end
+  return segs
+end
+
+-- Take the oldest `n` tiles off the line, returning their pieces to the supply.
+local function removeOldest(rider, n)
+  local ids = {}
+  for _ = 1, n do
+    local t = table.remove(rider.trail.tiles, 1)
+    rider.supply[t.gear][t.shape] = (rider.supply[t.gear][t.shape] or 0) + 1
+    ids[#ids + 1] = t.id
+  end
+  if n > 0 then rider.trail.segs = segsOf(rider.trail.tiles) end
+  return ids
 end
 
 function Rules.newState(colors, rollFn)
@@ -155,6 +220,7 @@ function Rules.newState(colors, rollFn)
       pose = nil,
       prizms = 0,
       supply = fullSupply(),
+      nextTileId = 1,
       trail = { segs = {}, tiles = {} },
     }
     state.riders[c].pose = randomLaunch(state, rollFn, c)
@@ -188,36 +254,40 @@ function Rules.resolveMove(state, color, move, rollFn)
   local shift = clamp(move.shift or 0, -Config.gears.maxShift, Config.gears.maxShift)
   local gear = clamp(rider.gear + shift, Config.gears.min, Config.gears.max)
 
-  -- 1b. tile supply: out of road crashes; an empty gear is just refused
-  local result
-  if not canMoveAtAll(state, color) then
-    return Rules.crash(state, color, "supply", nil, rollFn)
-  end
-  if Rules.supplyLeft(state, color, gear) <= 0 then
-    return { outcome = "invalid", reason = "supply", gear = gear, captured = {}, spawned = {} }
-  end
-
-  -- 2. turn check
+  -- 2. turn check: the curve die has numbered faces and one spin-out face
   local kind = move.kind
+  local want = "straight"
+  local shape = move.curve or "soft"
   local roll, spunOut, wentStraight = nil, false, false
   if kind == "left" or kind == "right" then
+    want = "curve"
     roll = rollFn(Config.turnCheck.die)
-    if roll >= gear then
-      -- curve succeeds
-    elseif roll == Config.turnCheck.spinOutRoll and gear >= Config.turnCheck.spinOutMinGear then
+    if roll == Config.turnCheck.die then
       spunOut = true            -- curve happens, gear drops afterwards
+    elseif roll >= gear then
+      -- curve succeeds
     else
       kind = "straight"
+      want = "straight"
       wentStraight = true
     end
   elseif kind ~= "straight" then
     error("Rules.resolveMove: unknown kind " .. tostring(kind))
   end
 
-  -- 3. geometry
-  local segs, exitPose = Geom.tilePath(kind, gear, rider.pose)
-  result = {
-    gear = gear, tileGear = gear, roll = roll, spunOut = spunOut, wentStraight = wentStraight,
+  -- 3. pick the piece (may substitute a lower one, or give up the oldest tiles)
+  local pieceGear, pieceShape, nRemove = Rules.planPiece(rider, want, shape, gear)
+  if pieceGear == nil then
+    return Rules.crash(state, color, "supply", nil, rollFn)   -- cannot happen with a sane config
+  end
+  local removedTiles = removeOldest(rider, nRemove)
+  local substituted = pieceGear ~= gear or (want == "curve" and pieceShape ~= shape)
+
+  -- 3b. geometry
+  local segs, exitPose = Geom.tilePath(kind, pieceGear, rider.pose, pieceShape)
+  local result = {
+    gear = gear, tileGear = pieceGear, shape = pieceShape, substituted = substituted,
+    removedTiles = removedTiles, roll = roll, spunOut = spunOut, wentStraight = wentStraight,
     kind = kind, segs = segs, exitPose = exitPose, captured = {}, spawned = {},
   }
 
@@ -235,8 +305,9 @@ function Rules.resolveMove(state, color, move, rollFn)
   end
   if crashReason then
     local r = Rules.crash(state, color, crashReason, crashOwner, rollFn)
-    r.segs, r.exitPose, r.kind, r.tileGear = segs, exitPose, kind, gear
+    r.segs, r.exitPose, r.kind, r.tileGear, r.shape = segs, exitPose, kind, pieceGear, pieceShape
     r.roll, r.spunOut, r.wentStraight = roll, spunOut, wentStraight
+    r.substituted, r.removedTiles = substituted, removedTiles
     return r
   end
 
@@ -245,8 +316,11 @@ function Rules.resolveMove(state, color, move, rollFn)
   for _, s in ipairs(segs) do
     rider.trail.segs[#rider.trail.segs + 1] = { a = { x = s.a.x, z = s.a.z }, b = { x = s.b.x, z = s.b.z } }
   end
-  rider.trail.tiles[#rider.trail.tiles + 1] = { kind = kind, gear = gear, entry = entry }
-  rider.supply[gear] = rider.supply[gear] - 1
+  rider.trail.tiles[#rider.trail.tiles + 1] = {
+    id = rider.nextTileId, kind = kind, shape = pieceShape, gear = pieceGear, entry = entry,
+  }
+  rider.nextTileId = rider.nextTileId + 1
+  rider.supply[pieceGear][pieceShape] = rider.supply[pieceGear][pieceShape] - 1
   rider.pose = { x = exitPose.x, z = exitPose.z, heading = exitPose.heading }
   rider.gear = spunOut and Config.gears.min or gear
   result.gear = rider.gear
@@ -311,7 +385,8 @@ function Rules.isValidState(state)
     local r = state.riders[c]
     if type(r) ~= "table" or type(r.pose) ~= "table" or type(r.trail) ~= "table"
       or type(r.trail.tiles) ~= "table" or type(r.trail.segs) ~= "table"
-      or type(r.supply) ~= "table" then
+      or type(r.supply) ~= "table" or type(r.supply[1]) ~= "table"
+      or type(r.nextTileId) ~= "number" then
       return false
     end
   end
@@ -324,29 +399,25 @@ function Rules.gearAfterShift(gear, shift)
   return clamp(gear + s, Config.gears.min, Config.gears.max)
 end
 
--- Chance (0..1) that a curve attempted at `gear` succeeds, and the chance of a
--- spin-out (which also curves, but drops the rider to gear 1).
+-- Chance (0..1) that a curve attempted at `gear` succeeds (a numbered face >= gear)
+-- and the chance of a spin-out (its own face: curves, then drops to gear 1).
 function Rules.curveOdds(gear)
   local die = Config.turnCheck.die
-  local ok = math.max(0, math.min(die, die - gear + 1)) / die
-  local spin = 0
-  if gear >= Config.turnCheck.spinOutMinGear and Config.turnCheck.spinOutRoll < gear then
-    spin = 1 / die
-  end
-  return ok, spin
+  local numbered = die - 1
+  local ok = math.max(0, math.min(numbered, numbered - gear + 1)) / die
+  return ok, 1 / die
 end
 
 -- Hand mode: may `color` drop a physical tile of (gear, kind) at table position
 -- pos = {x, z}? Returns true, shift on success; false, reason otherwise, where
--- reason is "over" | "turn" | "gear" | "supply" | "far".
-function Rules.validateTileDrop(state, color, gear, kind, pos)
+-- reason is "over" | "turn" | "gear" | "far".
+function Rules.validateTileDrop(state, color, gear, kind, pos, shape)
   if state.winner then return false, "over" end
   if Rules.currentColor(state) ~= color then return false, "turn" end
   local rider = state.riders[color]
   local shift = gear - rider.gear
   if math.abs(shift) > Config.gears.maxShift then return false, "gear" end
-  if Rules.supplyLeft(state, color, gear) <= 0 then return false, "supply" end
-  local center = Geom.tileCenter(kind, gear, rider.pose)
+  local center = Geom.tileCenter(kind, gear, rider.pose, shape)
   if Geom.distance(pos, center) > Config.snapRadius then return false, "far" end
   return true, shift
 end

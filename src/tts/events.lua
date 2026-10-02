@@ -179,22 +179,29 @@ end
 
 local function describe(color, move, r)
   local parts = {}
-  if r.roll then parts[#parts + 1] = "rolled " .. r.roll end
+  if r.roll then
+    parts[#parts + 1] = (r.roll == Config.turnCheck.die) and "rolled the SPIN-OUT face" or ("rolled " .. r.roll)
+  end
   if r.spunOut then
-    parts[#parts + 1] = "SPIN-OUT"
+    parts[#parts + 1] = "SPIN-OUT, drops to G1"
   elseif r.wentStraight then
     parts[#parts + 1] = "missed the turn, went straight"
   end
+  if r.removedTiles and #r.removedTiles > 0 then
+    parts[#parts + 1] = "out of tiles: gave up their " .. #r.removedTiles .. " oldest"
+  end
+  if r.substituted then parts[#parts + 1] = "used a lower/other tile" end
   if r.outcome == "crash" then
     local why = r.crashReason
     if r.crashReason == "bike" then why = "hit " .. r.crashOwner .. "'s bike"
-    elseif r.crashReason == "supply" then why = "out of road, no tiles left" end
+    elseif r.crashReason == "supply" then why = "no tile available" end
     parts[#parts + 1] = "CRASH (" .. why .. "), respawning"
   end
   if #r.captured > 0 then
     parts[#parts + 1] = "captured " .. #r.captured .. " Prizm(s)"
   end
-  return color .. " " .. move.kind .. " at G" .. tostring(r.gear)
+  local what = (r.shape and r.shape ~= "straight" and (r.shape .. " ") or "") .. (r.kind or move.kind)
+  return color .. " " .. what .. " (G" .. tostring(r.tileGear or r.gear) .. " tile)"
     .. (#parts > 0 and (": " .. table.concat(parts, ", ")) or "")
 end
 
@@ -205,7 +212,8 @@ local function apply(color, r)
     Spawn.rider(color, r.respawn)
     return
   end
-  Spawn.tile(color, r.segs, r.tileGear)
+  for _, id in ipairs(r.removedTiles or {}) do Spawn.removeTile(color, id) end
+  Spawn.tile(color, r.segs, r.tileGear, r.shape, State.riders[color].nextTileId - 1)
   Spawn.rider(color, r.exitPose)
   for _, id in ipairs(r.captured) do Spawn.removePrizm(id) end
   local first = #State.markers - #r.captured + 1
@@ -215,18 +223,14 @@ local function apply(color, r)
   for _, p in ipairs(r.spawned) do Spawn.prizm(p) end
 end
 
--- playerColor: the TTS colour of whoever clicked. kind: "straight"|"left"|"right"
-function Events.commitMove(playerColor, kind)
+-- playerColor: the TTS colour of whoever clicked. kind: "straight"|"left"|"right";
+-- curve: "soft"|"hard" (curves only).
+function Events.commitMove(playerColor, kind, curve)
   if not mayAct(playerColor) then return end
   local color = playerColor
-  local move = { shift = Events.pendingShift, kind = kind }
+  local move = { shift = Events.pendingShift, kind = kind, curve = curve or "soft" }
+  Events.pendingShift = 0
   local r = Rules.resolveMove(State, color, move, rollFn)
-  if r.outcome ~= "invalid" then Events.pendingShift = 0 end
-  if r.outcome == "invalid" then      -- no tiles in that gear: nothing happened, still their turn
-    printToColor("You have no G" .. r.gear .. " tiles left. Pick another gear.", color, { 1, 1, 1 })
-    UI_.refresh()
-    return
-  end
   apply(color, r)
   say(describe(color, move, r), rgb(color))
   if r.outcome == "win" then
@@ -249,13 +253,12 @@ local DROP_MESSAGES = {
   turn = "It isn't your turn.",
   over = "The game is over.",
   gear = "That tile is more than %d gear(s) from your current gear (G%d).",
-  supply = "You have no tiles of that gear left.",
   far  = "Drop the tile closer to where your trail ends.",
 }
 
 function Events.handleDrop(playerColor, obj)
   if State == nil or obj == nil then return end
-  local owner, gear, kind = Spawn.parseTileName(obj.getName())
+  local owner, gear, kind, shape = Spawn.parseTileName(obj.getName())
   if owner == nil or State.riders[owner] == nil then return end   -- not one of our tiles
   if Config.placementMode ~= "hand" then Spawn.returnTile(obj) return end
   if playerColor ~= owner then
@@ -264,7 +267,7 @@ function Events.handleDrop(playerColor, obj)
     return
   end
   local p = obj.getPosition()
-  local ok, v = Rules.validateTileDrop(State, owner, gear, kind, { x = p.x, z = p.z })
+  local ok, v = Rules.validateTileDrop(State, owner, gear, kind, { x = p.x, z = p.z }, shape)
   Spawn.returnTile(obj)
   if not ok then
     local msg = DROP_MESSAGES[v]
@@ -275,5 +278,5 @@ function Events.handleDrop(playerColor, obj)
     return
   end
   Events.pendingShift = v
-  Events.commitMove(owner, kind)
+  Events.commitMove(owner, kind, shape ~= "straight" and shape or nil)
 end

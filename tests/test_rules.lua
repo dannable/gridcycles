@@ -79,7 +79,7 @@ describe("Rules.resolveMove", function()
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "right" }, fixed(3))
     assert_eq(r.kind, "right")
     assert_false(r.wentStraight)
-    assert_near(st.riders.Red.pose.heading, Config.tiles[3].sweep)
+    assert_near(st.riders.Red.pose.heading, Config.tiles[3].soft.sweep)
   end)
 
   it("failed curve goes straight", function()
@@ -92,15 +92,15 @@ describe("Rules.resolveMove", function()
     assert_eq(r.gear, 3, "gear unchanged on failed curve")
   end)
 
-  it("spin-out at high gear curves and drops to gear 1", function()
+  it("the spin-out face curves and drops to gear 1", function()
     local st = newState()
     st.riders.Red.gear = 4
-    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "right" }, fixed(1))
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "right" }, fixed(Config.turnCheck.die))
     assert_true(r.spunOut)
     assert_eq(r.kind, "right")
     assert_eq(r.gear, 1)
     assert_eq(st.riders.Red.gear, 1)
-    assert_near(st.riders.Red.pose.heading, Config.tiles[4].sweep)
+    assert_near(st.riders.Red.pose.heading, Config.tiles[4].soft.sweep)
   end)
 
   it("a natural 1 below the spin-out gear just fails the curve", function()
@@ -161,8 +161,9 @@ describe("Rules.resolveMove", function()
 
   it("consecutive tiles do not crash on their own shared joint", function()
     local st = newState()
+    st.riders.Red.gear = 3
     for _, k in ipairs({ "straight", "right", "straight", "left", "straight" }) do
-      local r = Rules.resolveMove(st, "Red", { shift = 0, kind = k }, fixed(6))
+      local r = Rules.resolveMove(st, "Red", { shift = 0, kind = k }, fixed(5))
       assert_eq(r.outcome, "placed", "tile " .. k)
     end
     assert_eq(#st.riders.Red.trail.tiles, 5)
@@ -312,13 +313,13 @@ describe("Rules helpers for the UI", function()
     assert_eq(Rules.gearAfterShift(3, 1), 4)
     assert_eq(Rules.gearAfterShift(3, 5), 4)
   end)
-  it("curveOdds: gear 1 always succeeds, gear 4 needs 4+, spin-out 1/6 at G4+", function()
+  it("curveOdds: faces 1-5 plus a spin-out face; success needs a numbered face >= gear", function()
     local ok, spin = Rules.curveOdds(1)
-    assert_near(ok, 1); assert_eq(spin, 0)
+    assert_near(ok, 5 / 6); assert_near(spin, 1 / 6)
     ok, spin = Rules.curveOdds(4)
-    assert_near(ok, 3 / 6); assert_near(spin, 1 / 6)
-    ok, spin = Rules.curveOdds(3)
-    assert_near(ok, 4 / 6); assert_eq(spin, 0)
+    assert_near(ok, 2 / 6); assert_near(spin, 1 / 6)
+    ok, spin = Rules.curveOdds(5)
+    assert_near(ok, 1 / 6); assert_near(spin, 1 / 6)
   end)
 end)
 
@@ -425,72 +426,141 @@ describe("bike as part of the trail", function()
 end)
 
 describe("tile supply", function()
-  it("starts full and a placed tile uses one from its own gear", function()
-    local st = newState()
-    for g = 1, 5 do assert_eq(st.riders.Red.supply[g], Config.tileSupply[g]) end
-    local r = Rules.resolveMove(st, "Red", { shift = 1, kind = "straight" }, fixed(3))
-    assert_eq(r.tileGear, 2)
-    assert_eq(st.riders.Red.supply[2], Config.tileSupply[2] - 1)
-    assert_eq(st.riders.Red.supply[1], Config.tileSupply[1])
+  local function setup()
+    return newState()
+  end
+  local function use(st, shift, kind, curve, roll)
+    return Rules.resolveMove(st, "Red", { shift = shift, kind = kind, curve = curve }, fixed(roll or 5))
+  end
+
+  it("starts with the configured pieces per gear and shape", function()
+    local st = setup()
+    for g = 1, 5 do
+      for shape, n in pairs(Config.tileSupply[g]) do assert_eq(st.riders.Red.supply[g][shape], n) end
+    end
+    assert_eq(st.riders.Red.supply[5].soft, nil, "gear 5 has no curves")
+    assert_eq(st.riders.Red.supply[4].hard, nil, "gear 4 has no hard curve")
   end)
-  it("a spin-out uses a tile of the gear it was laid at, not G1", function()
-    local st = newState()
+  it("a placed tile uses one piece of its own gear and shape", function()
+    local st = setup()
+    local r = use(st, 1, "straight")
+    assert_eq(r.tileGear, 2); assert_eq(r.shape, "straight"); assert_false(r.substituted)
+    assert_eq(st.riders.Red.supply[2].straight, Config.tileSupply[2].straight - 1)
+    assert_eq(st.riders.Red.supply[1].straight, Config.tileSupply[1].straight)
+  end)
+  it("a hard curve turns tighter than a soft one and uses the hard supply", function()
+    local st = setup()
+    st.riders.Red.gear = 2
+    local r = use(st, 0, "right", "hard", 5)
+    assert_eq(r.shape, "hard")
+    assert_near(st.riders.Red.pose.heading, Config.tiles[2].hard.sweep)
+    assert_eq(st.riders.Red.supply[2].hard, Config.tileSupply[2].hard - 1)
+  end)
+  it("a spin-out uses a piece of the gear it was laid at, not gear 1", function()
+    local st = setup()
     st.riders.Red.gear = 4
-    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "left" }, fixed(1))
+    local r = use(st, 0, "left", "soft", Config.turnCheck.die)
     assert_true(r.spunOut)
     assert_eq(r.tileGear, 4)
-    assert_eq(st.riders.Red.supply[4], Config.tileSupply[4] - 1)
+    assert_eq(st.riders.Red.supply[4].soft, Config.tileSupply[4].soft - 1)
     assert_eq(st.riders.Red.gear, 1)
   end)
-  it("an empty gear is refused and nothing changes", function()
-    local st = newState()
-    st.riders.Red.supply[1] = 0
-    local pose = { x = st.riders.Red.pose.x, z = st.riders.Red.pose.z }
-    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
-    assert_eq(r.outcome, "invalid")
-    assert_eq(r.reason, "supply")
-    assert_eq(st.riders.Red.pose.z, pose.z)
+  it("out of straights in your gear: the straight from the next gear down", function()
+    local st = setup()
+    st.riders.Red.gear = 3
+    st.riders.Red.supply[3].straight = 0
+    local r = use(st, 0, "straight")
+    assert_eq(r.tileGear, 2); assert_eq(r.shape, "straight"); assert_true(r.substituted)
+    assert_eq(#r.removedTiles, 0)
+    assert_eq(st.riders.Red.gear, 3, "your gear does not change")
+    assert_eq(st.riders.Red.supply[2].straight, Config.tileSupply[2].straight - 1)
+  end)
+  it("walks down more than one gear if needed", function()
+    local st = setup()
+    st.riders.Red.gear = 3
+    st.riders.Red.supply[3].straight = 0
+    st.riders.Red.supply[2].straight = 0
+    local r = use(st, 0, "straight")
+    assert_eq(r.tileGear, 1)
+  end)
+  it("out of hard curves: the soft curve of the same gear before any lower gear", function()
+    local st = setup()
+    st.riders.Red.gear = 3
+    st.riders.Red.supply[3].hard = 0
+    local r = use(st, 0, "right", "hard", 5)
+    assert_eq(r.tileGear, 3); assert_eq(r.shape, "soft"); assert_true(r.substituted)
+  end)
+  it("out of all curves in your gear: a curve from the next gear down, even with straights left", function()
+    local st = setup()
+    st.riders.Red.gear = 3
+    st.riders.Red.supply[3].hard, st.riders.Red.supply[3].soft = 0, 0
+    local r = use(st, 0, "left", "soft", 5)
+    assert_eq(r.tileGear, 2); assert_eq(r.shape, "soft")
+    assert_eq(st.riders.Red.supply[3].straight, Config.tileSupply[3].straight, "straights untouched")
+  end)
+  it("a successful turn in gear 5 (no curves exist) uses a gear 4 soft curve", function()
+    local st = setup()
+    st.riders.Red.gear = 5
+    local r = use(st, 0, "right", "soft", 5)
+    assert_false(r.wentStraight)
+    assert_eq(r.tileGear, 4); assert_eq(r.shape, "soft")
+  end)
+  it("a failed turn needs a straight, so it uses the straight supply", function()
+    local st = setup()
+    st.riders.Red.gear = 3
+    local r = use(st, 0, "right", "soft", 1)
+    assert_true(r.wentStraight)
+    assert_eq(r.shape, "straight")
+    assert_eq(st.riders.Red.supply[3].straight, Config.tileSupply[3].straight - 1)
+  end)
+  it("nothing left at your gear or below: oldest tiles come off one at a time until one fits", function()
+    local st = setup()
+    -- two G1 straights on the line, then a third straight at G1
+    use(st, 0, "straight"); use(st, 0, "straight")
+    assert_eq(st.riders.Red.supply[1].straight, 0)
+    local ids = { st.riders.Red.trail.tiles[1].id, st.riders.Red.trail.tiles[2].id }
+    local r = use(st, 0, "straight")
+    assert_eq(r.outcome, "placed")
+    assert_eq(#r.removedTiles, 1)
+    assert_eq(r.removedTiles[1], ids[1], "the oldest goes first")
+    assert_eq(#st.riders.Red.trail.tiles, 2)
+    assert_eq(st.riders.Red.trail.tiles[1].id, ids[2])
+    assert_eq(#st.riders.Red.trail.segs, 2, "segments rebuilt without the removed tile")
+    assert_eq(st.riders.Red.supply[1].straight, 0, "returned, then used again")
+  end)
+  it("tiles of higher gears are removed too if they come first, even though they don't help", function()
+    local st = setup()
+    local red = st.riders.Red
+    red.gear = 2
+    red.trail.tiles = {
+      { id = 1, kind = "straight", shape = "straight", gear = 5, entry = { x = 0, z = -20, heading = 0 } },
+      { id = 2, kind = "straight", shape = "straight", gear = 1, entry = { x = 0, z = -14, heading = 0 } },
+    }
+    red.supply[5].straight, red.supply[1].straight, red.supply[2].straight = 0, 0, 0
+    local g, shape, removed = Rules.planPiece(red, "straight", nil, 2)
+    assert_eq(removed, 2, "the G5 tile is taken first and does not help")
+    assert_eq(g, 1)
+    assert_eq(#red.trail.tiles, 2, "planPiece does not change the rider")
+    assert_eq(red.supply[5].straight, 0)
+  end)
+  it("a crash gives every piece back", function()
+    local st = setup()
+    st.riders.Red.pose = { x = 0, z = 17, heading = 0 }
+    use(st, 0, "straight")   -- leaves the mat
+    assert_eq(st.riders.Red.supply[1].straight, Config.tileSupply[1].straight)
     assert_eq(#st.riders.Red.trail.tiles, 0)
   end)
-  it("shifting to a stocked gear still works when the current one is empty", function()
-    local st = newState()
-    st.riders.Red.supply[1] = 0
-    local r = Rules.resolveMove(st, "Red", { shift = 1, kind = "straight" }, fixed(3))
-    assert_eq(r.outcome, "placed")
-    assert_eq(r.tileGear, 2)
-  end)
-  it("no tiles left in any reachable gear = out of road: crash, trail and supply reset", function()
-    local st = newState()
-    local red = st.riders.Red
-    red.supply[1], red.supply[2] = 0, 0
-    red.trail.tiles[1] = { kind = "straight", gear = 3, entry = { x = 0, z = -14, heading = 0 } }
-    red.trail.segs[1] = { a = { x = 0, z = -14 }, b = { x = 0, z = -10 } }
-    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
-    assert_eq(r.outcome, "crash")
-    assert_eq(r.crashReason, "supply")
-    assert_eq(#red.trail.tiles, 0)
-    for g = 1, 5 do assert_eq(red.supply[g], Config.tileSupply[g]) end
-  end)
-  it("a normal crash gives the whole supply back", function()
-    local st = newState()
-    st.riders.Red.pose = { x = 0, z = 17, heading = 0 }
-    st.riders.Red.supply[3] = 1
-    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))   -- leaves the mat
-    assert_eq(r.crashReason, "bounds")
-    assert_eq(st.riders.Red.supply[3], Config.tileSupply[3])
-  end)
-  it("old saves without a supply are rejected", function()
-    local st = newState()
+  it("saves from before typed supplies are rejected", function()
+    local st = setup()
     assert_true(Rules.isValidState(st))
-    st.riders.Red.supply = nil
+    st.riders.Red.supply = { 8, 7, 6, 5, 4 }
     assert_false(Rules.isValidState(st))
   end)
-  it("hand mode refuses a drop of an empty gear", function()
-    local st = newState()
-    st.riders.Red.supply[1] = 0
-    local ok, why = Rules.validateTileDrop(st, "Red", 1, "straight", { x = 0, z = -9 })
-    assert_false(ok)
-    assert_eq(why, "supply")
+  it("tiles get unique, increasing ids", function()
+    local st = setup()
+    use(st, 0, "straight"); use(st, 0, "straight")
+    local t = st.riders.Red.trail.tiles
+    assert_true(t[2].id > t[1].id)
   end)
 end)
 

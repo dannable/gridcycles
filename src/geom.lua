@@ -42,9 +42,10 @@ local function normHeading(h)
   return h
 end
 
--- Build the path for one tile.
+-- Build the path for one tile. `shape` picks the curve ("soft" default, or "hard");
+-- it is ignored for straights.
 -- Returns: segments (array of Segment), exitPose (Pose)
-function Geom.tilePath(kind, gear, entryPose)
+function Geom.tilePath(kind, gear, entryPose, shape)
   local t = Config.tiles[gear]
   assert(t, "Geom.tilePath: unknown gear " .. tostring(gear))
   local h = entryPose.heading * RAD
@@ -60,7 +61,9 @@ function Geom.tilePath(kind, gear, entryPose)
   if kind == "right" then s = 1 elseif kind == "left" then s = -1
   else error("Geom.tilePath: unknown kind " .. tostring(kind)) end
 
-  local r, sweep, n = t.radius, t.sweep, Config.arcSegments
+  local def = t[shape or "soft"]
+  assert(def, "Geom.tilePath: no " .. tostring(shape or "soft") .. " curve at gear " .. tostring(gear))
+  local r, sweep, n = def.radius, def.sweep, Config.arcSegments
   -- circle centre sits 90 degrees to the turning side of the entry heading
   local cx = p.x + r * math.sin(h + s * math.pi / 2)
   local cz = p.z + r * math.cos(h + s * math.pi / 2)
@@ -185,14 +188,14 @@ local function dist(p, q)
 end
 
 -- Straight-line distance from a tile's entry to its exit (used to size physical tiles).
-function Geom.tileChord(kind, gear)
-  local _, exit = Geom.tilePath(kind, gear, { x = 0, z = 0, heading = 0 })
+function Geom.tileChord(kind, gear, shape)
+  local _, exit = Geom.tilePath(kind, gear, { x = 0, z = 0, heading = 0 }, shape)
   return dist({ x = 0, z = 0 }, exit)
 end
 
 -- Midpoint between entry and exit of the tile that WOULD be laid from `pose`.
-function Geom.tileCenter(kind, gear, pose)
-  local _, exit = Geom.tilePath(kind, gear, pose)
+function Geom.tileCenter(kind, gear, pose, shape)
+  local _, exit = Geom.tilePath(kind, gear, pose, shape)
   return { x = (pose.x + exit.x) / 2, z = (pose.z + exit.z) / 2 }
 end
 

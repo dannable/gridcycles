@@ -24,6 +24,7 @@ Tabletop Simulator mod: neon light-cycle racing, an original reskin inspired by 
 - **All tunables live in `src/config.lua`.** Don't hard-code tile lengths, gears, thresholds or counts elsewhere.
 - **Inject randomness.** Rules functions take a `rollFn` so tests are deterministic.
 - `UI` is a reserved TTS global; our helper table is `UI_`.
+- **Keep third-party reference material out of git.** `*.pdf` and `reference/` are git-ignored; the repo is public. Rules ideas may inform us, but write rules in our own words.
 - **Original IP only.** Don't use "Lazer Ryderz", its rider names, art or rules text in any shipped file, UI string or asset. The game is named "Gridcycles".
 
 ## Conventions

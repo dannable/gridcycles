@@ -28,7 +28,7 @@ end
 
 local function tint(c) return { r = c[1], g = c[2], b = c[3] } end
 
-local function place(params, color, groupTag)
+local function place(params, color, groupTag, tileTag)
   local obj = spawnObject({
     type = params.type or Config.tts.blockType,
     position = params.position,
@@ -42,6 +42,7 @@ local function place(params, color, groupTag)
       o.interactable = false
       o.addTag(VISUAL_TAG)
       o.addTag(groupTag)
+      if tileTag then o.addTag(tileTag) end
       if params.name then o.setName(params.name) end
       if params.label then
         -- flat text on the object's top face; the button is scaled to undo the
@@ -58,6 +59,7 @@ local function place(params, color, groupTag)
     end,
   })
   register(obj, groupTag)
+  if tileTag then register(obj, tileTag) end
   return obj
 end
 
@@ -86,24 +88,30 @@ function Spawn.mat()
 end
 
 -- One thin block per path segment.
-function Spawn.trailSegment(seg, color, groupTag)
+function Spawn.trailSegment(seg, color, groupTag, tileTag)
   local t = Config.tts
   local p = Geom.segmentPose(seg)
   place({
     position = { p.x, t.tableY + t.matThickness + t.trailHeight / 2, p.z },
     rotation = { 0, p.heading, 0 },
     scale = { t.trailWidth, t.trailHeight, p.length + t.trailWidth * 0.5 },
-  }, Config.palette[color], groupTag)
+  }, Config.palette[color], groupTag, tileTag)
 end
 
+local SHAPE_LABEL = { straight = "", soft = "S", hard = "H" }
+local SHAPE_NAME = { straight = "Straight", soft = "Soft", hard = "Hard" }
+
 -- One laid tile: its wall segments, a pale divider bar across the wall at the joint
--- where it starts, and a plate on top showing its gear. The plate keeps a fixed
--- orientation (not rotated with the trail) so the digit reads the same everywhere.
-function Spawn.tile(color, segs, gear)
+-- where it starts, and a plate on top showing its gear (plus S/H for a soft/hard
+-- curve). The plate keeps a fixed orientation (not rotated with the trail) so the
+-- digit reads the same everywhere. Every part is tagged gc_tile_<Color>_<id> so the
+-- tile can be removed on its own when its owner gives up their oldest tiles.
+function Spawn.tile(color, segs, gear, shape, id)
   local t = Config.tts
   local group = "gc_trail_" .. color
+  local tileTag = "gc_tile_" .. color .. "_" .. tostring(id)
   for _, s in ipairs(segs) do
-    Spawn.trailSegment(s, color, group)
+    Spawn.trailSegment(s, color, group, tileTag)
   end
   local top = t.tableY + t.matThickness + t.trailHeight
   local first = Geom.segmentPose(segs[1])
@@ -112,15 +120,20 @@ function Spawn.tile(color, segs, gear)
     rotation = { 0, first.heading, 0 },
     scale = { t.trailWidth * 2.4, t.trailHeight * 1.1, 0.07 },
     name = color .. " tile joint",
-  }, t.dividerColor, group)
+  }, t.dividerColor, group, tileTag)
   local mid = Geom.segmentPose(segs[math.ceil(#segs / 2)])
   local plate = t.labelPlate
+  shape = shape or "straight"
   place({
     position = { mid.x, top + 0.02, mid.z },
     scale = { plate, 0.04, plate },
-    name = color .. " G" .. tostring(gear),
-    label = { text = tostring(gear), color = Config.palette[color] },
-  }, t.labelPlateColor, group)
+    name = color .. " G" .. tostring(gear) .. " " .. SHAPE_NAME[shape],
+    label = { text = tostring(gear) .. SHAPE_LABEL[shape], color = Config.palette[color] },
+  }, t.labelPlateColor, group, tileTag)
+end
+
+function Spawn.removeTile(color, id)
+  Spawn.clearGroup("gc_tile_" .. color .. "_" .. tostring(id))
 end
 
 function Spawn.prizm(prizm)
@@ -212,38 +225,61 @@ end
 function gcNoop() end
 
 -- Hand mode ---------------------------------------------------------------
--- Each rider gets a tray: one locked slab plus 15 draggable tiles
--- (5 gears x straight/left/right). Tiles are named "<Color> G<gear> <Kind>" and
--- always return to their slot; the script lays the real trail piece itself.
+-- Each rider gets a tray: one locked slab plus one draggable tile per piece type
+-- (every gear/shape/direction in Config.tileSupply). Tiles are named
+-- "<Color> G<gear> <Straight|Soft Left|Hard Right|...>" and always return to their
+-- slot; the script lays the real trail piece itself.
 
-local KINDS = { { "straight", "Straight" }, { "left", "Left" }, { "right", "Right" } }
+local DIRS = { { "left", "Left" }, { "right", "Right" } }
+local SHAPES = { "straight", "soft", "hard" }
+
+-- Ordered list of tray tiles: { gear, kind, shape, label }.
+local function trayEntries()
+  local list = {}
+  for g = Config.gears.min, Config.gears.max do
+    local row = Config.tileSupply[g] or {}
+    for _, shape in ipairs(SHAPES) do
+      if (row[shape] or 0) > 0 then
+        if shape == "straight" then
+          list[#list + 1] = { g, "straight", "straight", "Straight" }
+        else
+          for _, d in ipairs(DIRS) do
+            list[#list + 1] = { g, d[1], shape, SHAPE_NAME[shape] .. " " .. d[2] }
+          end
+        end
+      end
+    end
+  end
+  return list
+end
 
 local function trayRowZ(index)
   return -(Config.mat.depth / 2 + Config.tts.trayOffset + (index - 1) * Config.tts.trayRowDepth)
 end
 
-local function slotX(slot)
-  local total = (Config.gears.max - Config.gears.min + 1) * #KINDS
+local function slotX(slot, total)
   return (slot - (total + 1) / 2) * Config.tts.trayGap
 end
 
--- "Red G3 Left" -> "Red", 3, "left"
+-- "Red G3 Soft Left" -> "Red", 3, "left", "soft"; "Red G2 Straight" -> "Red", 2, "straight", "straight"
 function Spawn.parseTileName(name)
-  local color, gear, kindName = tostring(name):match("^(%a+) G(%d) (%a+)$")
+  local color, gear, rest = tostring(name):match("^(%a+) G(%d) (.+)$")
   if not color then return nil end
-  for _, k in ipairs(KINDS) do
-    if k[2] == kindName then return color, tonumber(gear), k[1] end
+  for _, e in ipairs(trayEntries()) do
+    if e[4] == rest and e[1] == tonumber(gear) then return color, e[1], e[2], e[3] end
   end
   return nil
 end
 
 -- Slot position of a tray tile, derived from its name so no object ids are needed.
-local function homePos(color, gear, kind, rowIndex)
+local function homePos(color, gear, kind, shape, rowIndex)
   local t = Config.tts
-  local kindIdx = 1
-  for i, k in ipairs(KINDS) do if k[1] == kind then kindIdx = i end end
-  local slot = (gear - Config.gears.min) * #KINDS + kindIdx
-  return { slotX(slot), t.tableY + t.matThickness + t.tileHeight / 2 + 0.05, trayRowZ(rowIndex) }
+  local entries = trayEntries()
+  local slot = 1
+  for i, e in ipairs(entries) do
+    if e[1] == gear and e[2] == kind and e[3] == shape then slot = i end
+  end
+  return { slotX(slot, #entries), t.tableY + t.matThickness + t.tileHeight / 2 + 0.05, trayRowZ(rowIndex) }
 end
 
 function Spawn.trayTiles(color, index)
@@ -254,40 +290,35 @@ function Spawn.trayTiles(color, index)
     scale = { Config.mat.width, t.matThickness, t.trayRowDepth - 1 },
     name = color .. " tray",
   }, t.matColor, "gc_tray_" .. color)
-  local slot = 0
-  for g = Config.gears.min, Config.gears.max do
-    for _, k in ipairs(KINDS) do
-      slot = slot + 1
-      local kind, label = k[1], k[2]
-      local pos = homePos(color, g, kind, index)
-      local obj = spawnObject({
-        type = t.blockType,
-        position = pos,
-        rotation = { 0, 0, 0 },
-        scale = { t.tileWidth, t.tileHeight * (kind == "straight" and 1 or 2), Geom.tileChord(kind, g) },
-        sound = false,
-        snap_to_grid = false,
-        callback_function = function(o)
-          o.setColorTint(tint(Config.palette[color]))
-          o.setName(color .. " G" .. g .. " " .. label)
-          o.addTag(VISUAL_TAG)
-          o.addTag("gc_tray_" .. color)
-          o.addTag("gc_tile")
-        end,
-      })
-      register(obj, "gc_tray_" .. color)
-    end
+  for _, e in ipairs(trayEntries()) do
+    local g, kind, shape, label = e[1], e[2], e[3], e[4]
+    local obj = spawnObject({
+      type = t.blockType,
+      position = homePos(color, g, kind, shape, index),
+      rotation = { 0, 0, 0 },
+      scale = { t.tileWidth, t.tileHeight * (kind == "straight" and 1 or 2), Geom.tileChord(kind, g, shape) },
+      sound = false,
+      snap_to_grid = false,
+      callback_function = function(o)
+        o.setColorTint(tint(Config.palette[color]))
+        o.setName(color .. " G" .. g .. " " .. label)
+        o.addTag(VISUAL_TAG)
+        o.addTag("gc_tray_" .. color)
+        o.addTag("gc_tile")
+      end,
+    })
+    register(obj, "gc_tray_" .. color)
   end
 end
 
 -- Send a dragged tile back to its slot.
 function Spawn.returnTile(obj)
-  local color, gear, kind = Spawn.parseTileName(obj.getName())
+  local color, gear, kind, shape = Spawn.parseTileName(obj.getName())
   if color == nil or State == nil then return end
   local rowIndex
   for i, c in ipairs(State.order) do if c == color then rowIndex = i end end
   if rowIndex == nil then return end
-  local pos = homePos(color, gear, kind, rowIndex)
+  local pos = homePos(color, gear, kind, shape, rowIndex)
   obj.setRotation({ 0, 0, 0 })
   obj.setPositionSmooth(pos, false, true)
 end
@@ -300,8 +331,8 @@ function Spawn.rebuild(state)
     local r = state.riders[color]
     for _, tile in ipairs(r.trail.tiles) do
       -- tiles hold their entry pose + kind; segments are recomputed, not stored per tile
-      local segs = Geom.tilePath(tile.kind, tile.gear, tile.entry)
-      Spawn.tile(color, segs, tile.gear)
+      local segs = Geom.tilePath(tile.kind, tile.gear, tile.entry, tile.shape)
+      Spawn.tile(color, segs, tile.gear, tile.shape, tile.id)
     end
     Spawn.rider(color, r.pose)
   end
