@@ -96,19 +96,74 @@ local function touchesPoint(seg, p)
   return samePoint(seg.a, p) or samePoint(seg.b, p)
 end
 
--- True if any of newSegs hits any trail segment. A second return value is the
--- trail entry that was hit.
+local function dist(p, q)
+  local dx, dz = p.x - q.x, p.z - q.z
+  return math.sqrt(dx * dx + dz * dz)
+end
+
+-- Distance from point p to segment seg.
+function Geom.pointSegDist(p, seg)
+  local dx, dz = seg.b.x - seg.a.x, seg.b.z - seg.a.z
+  local len2 = dx * dx + dz * dz
+  if len2 == 0 then return dist(p, seg.a) end
+  local t = ((p.x - seg.a.x) * dx + (p.z - seg.a.z) * dz) / len2
+  t = math.max(0, math.min(1, t))
+  return dist(p, { x = seg.a.x + t * dx, z = seg.a.z + t * dz })
+end
+
+-- Smallest distance between two segments (0 if they touch or cross).
+function Geom.segmentDistance(s1, s2)
+  if Geom.segmentsIntersect(s1, s2) then return 0 end
+  return math.min(
+    Geom.pointSegDist(s1.a, s2), Geom.pointSegDist(s1.b, s2),
+    Geom.pointSegDist(s2.a, s1), Geom.pointSegDist(s2.b, s1))
+end
+
+-- Smallest distance from any of `segs` to segment `seg`.
+function Geom.pathDistance(segs, seg)
+  local best = math.huge
+  for _, s in ipairs(segs) do
+    local d = Geom.segmentDistance(s, seg)
+    if d < best then best = d end
+  end
+  return best
+end
+
+-- A representative point where intersecting segments a and b touch: the crossing
+-- point, or for collinear overlaps / endpoint touches an endpoint lying on the other.
+function Geom.contactPoint(a, b)
+  local rx, rz = a.b.x - a.a.x, a.b.z - a.a.z
+  local sx, sz = b.b.x - b.a.x, b.b.z - b.a.z
+  local denom = rx * sz - rz * sx
+  if math.abs(denom) > eps() then
+    local t = ((b.a.x - a.a.x) * sz - (b.a.z - a.a.z) * sx) / denom
+    return { x = a.a.x + t * rx, z = a.a.z + t * rz }
+  end
+  for _, p in ipairs({ b.a, b.b }) do
+    if Geom.pointSegDist(p, a) <= eps() then return { x = p.x, z = p.z } end
+  end
+  for _, p in ipairs({ a.a, a.b }) do
+    if Geom.pointSegDist(p, b) <= eps() then return { x = p.x, z = p.z } end
+  end
+  return { x = a.a.x, z = a.a.z }
+end
+
+-- True if any of newSegs hits any trail segment. Further return values: the trail
+-- entry that was hit and the exact old segment.
 -- trails: array of { owner = color, segs = {Segment...}, kind = "bike"|nil }
 -- ignoreJoint: Point to ignore (the joint with the mover's own previous tile).
 -- A new/old segment pair that both end at the joint is skipped.
-function Geom.pathHitsTrails(newSegs, trails, ignoreJoint)
+-- passFn(point) -> true: contact at that point is harmless (e.g. on top of a Prizm).
+function Geom.pathHitsTrails(newSegs, trails, ignoreJoint, passFn)
   for _, trail in ipairs(trails) do
     for _, old in ipairs(trail.segs) do
       for _, ns in ipairs(newSegs) do
         if Geom.segmentsIntersect(ns, old) then
           local atJoint = ignoreJoint ~= nil
             and touchesPoint(ns, ignoreJoint) and touchesPoint(old, ignoreJoint)
-          if not atJoint then return true, trail end
+          if not atJoint and not (passFn and passFn(Geom.contactPoint(ns, old))) then
+            return true, trail, old
+          end
         end
       end
     end
@@ -180,11 +235,6 @@ function Geom.segmentPose(seg)
     length = math.sqrt(dx * dx + dz * dz),
     heading = (atan2(dx, dz) / RAD) % 360,
   }
-end
-
-local function dist(p, q)
-  local dx, dz = p.x - q.x, p.z - q.z
-  return math.sqrt(dx * dx + dz * dz)
 end
 
 -- Straight-line distance from a tile's entry to its exit (used to size physical tiles).

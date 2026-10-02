@@ -86,7 +86,7 @@ describe("TTS glue, solo (stubbed)", function()
     assert_eq(State.order[1], "Yellow")
     assert_eq(count("gc_mat"), 1)
     assert_eq(count("gc_rider_Yellow"), 1)
-    assert_eq(count("gc_visual"), 1 + 1 + Config.prizmsOnTable)
+    assert_eq(count("gc_visual"), 1 + 1 + Config.neutralPrizmsPerPlayer)
     assert_true(uiText.gcStatus:find("Yellow's turn") ~= nil)
     assert_eq(Turns.turn_color, "Yellow")
   end)
@@ -122,22 +122,23 @@ describe("TTS glue, solo (stubbed)", function()
     assert_eq(count("gc_rider_Yellow"), 1)
   end)
 
-  it("capture removes the Prizm and adds a marker", function()
+  it("scoring redraws the Prizm in the rider's colour", function()
     State.riders.Yellow.pose = { x = 0, z = -10, heading = 0 }
     State.riders.Yellow.gear = 1
     State.prizms = { { id = 50, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } }
     Spawn.prizm(State.prizms[1])
     Events.commitMove("Yellow", "straight")
-    assert_eq(count("gc_prizm_50"), 0)
-    assert_eq(count("gc_marker_1"), 1)
-    assert_eq(State.riders.Yellow.prizms, 1)
+    assert_eq(count("gc_prizm_50"), 1, "redrawn, not removed")
+    assert_eq(State.prizms[1].owner, "Yellow")
+    assert_eq(Rules.prizmCount(State, "Yellow"), 1)
+    assert_eq(getObjectsWithTag("gc_prizm_50")[1].name, "Yellow Prizm")
   end)
 
   it("restore rebuilds visuals from a copy of the saved state", function()
     State = deepcopy(State)
     Events.restore()
     assert_eq(count("gc_mat"), 1)
-    assert_eq(count("gc_marker_1"), 1)
+    assert_eq(count("gc_prizm_50"), 1)
     assert_eq(count("gc_rider_Yellow"), 1)
   end)
 end)
@@ -169,17 +170,27 @@ describe("TTS glue, multiplayer (stubbed)", function()
     assert_true(uiText.gcStatus:find("Blue's turn") ~= nil)
   end)
 
-  it("a crash also passes the turn", function()
+  it("a crash also passes the turn; the round ends and a new order is announced", function()
     State.riders.Blue.pose = { x = 0, z = Config.mat.depth / 2, heading = 0 }
     Events.commitMove("Blue", "straight")
-    assert_eq(Rules.currentColor(State), "Red")
+    assert_eq(State.round, 2)
+    assert_eq(Rules.currentColor(State), "Blue", "tie-breaker moved on, both in gear 1")
+    assert_eq(Turns.turn_color, "Blue")
+    assert_eq(Turns.order[1], "Blue")
+    local said = false
+    for _, m in ipairs(broadcasts) do if m:find("Round 2 order: Blue, Red", 1, true) then said = true end end
+    assert_true(said)
+    assert_true(uiText.gcOrder:find("Round 2: Blue > Red", 1, true) ~= nil, uiText.gcOrder)
   end)
 
   it("a win freezes the game until New game", function()
+    State.roundOrder, State.turn = { "Red", "Blue" }, 1
     State.riders.Red.pose = { x = 0, z = -10, heading = 0 }
     State.riders.Red.gear = 1
-    State.riders.Red.prizms = Config.prizmsToWin - 1
     State.prizms = { { id = 60, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } }
+    for i = 1, Config.prizmsToWin - 1 do
+      State.prizms[#State.prizms + 1] = { id = 70 + i, owner = "Red", a = { x = -9, z = i }, b = { x = -8, z = i } }
+    end
     Events.commitMove("Red", "straight")
     assert_eq(State.winner, "Red")
     assert_true(uiText.gcStatus:find("WINS") ~= nil)
@@ -527,8 +538,9 @@ describe("Tile supply and removal (stubbed)", function()
     assert_eq(#getObjectsWithTag("gc_trail_Red"), 2 * 3)
   end)
   it("the log says when a rider gave up tiles", function()
-    local last = broadcasts[#broadcasts]
-    assert_true(last:find("oldest", 1, true) ~= nil or last:find("turn", 1, true) ~= nil)
+    local said = false
+    for _, m in ipairs(broadcasts) do if m:find("oldest", 1, true) then said = true end end
+    assert_true(said)
   end)
   it("move buttons are never disabled for lack of tiles", function()
     Events.settings.mode = "commit"
@@ -537,5 +549,48 @@ describe("Tile supply and removal (stubbed)", function()
     UI_.refresh()
     assert_eq(attrs["gcb_Red_straight.interactable"], "true")
     assert_eq(attrs["gcb_Red_hardleft.interactable"], "true")
+  end)
+end)
+
+describe("Prizm stealing and victims on the table (stubbed)", function()
+  it("a stolen Prizm is redrawn in the thief's colour", function()
+    Events.settings.mode = "commit"
+    seated = { "Red", "Blue" }
+    Events.newGame()
+    State.roundOrder, State.turn = { "Red", "Blue" }, 1
+    State.riders.Red.pose = { x = 0, z = -10, heading = 0 }
+    State.prizms = { { id = 90, owner = "Blue", a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } }
+    Spawn.prizm(State.prizms[1])
+    assert_eq(getObjectsWithTag("gc_prizm_90")[1].name, "Blue Prizm")
+    Events.commitMove("Red", "straight")
+    assert_eq(#getObjectsWithTag("gc_prizm_90"), 1)
+    assert_eq(getObjectsWithTag("gc_prizm_90")[1].name, "Red Prizm")
+    local said = false
+    for _, m in ipairs(broadcasts) do if m:find("STOLE a Prizm from Blue", 1, true) then said = true end end
+    assert_true(said)
+  end)
+  it("a crash victim's removed tiles disappear from the table", function()
+    Events.newGame()
+    State.prizms = {}
+    State.roundOrder, State.turn = { "Blue", "Red" }, 1
+    State.riders.Blue.pose = { x = 10, z = 10, heading = 180 }
+    State.riders.Red.pose = { x = 7, z = 6.5, heading = 90 }
+    for _, shift in ipairs({ 0, 1, 1 }) do
+      State.roundOrder, State.turn = { "Blue", "Red" }, 1
+      Events.setShift("Blue", shift)
+      Events.commitMove("Blue", "straight")
+    end
+    assert_eq(#State.riders.Blue.trail.tiles, 3)
+    assert_eq(#getObjectsWithTag("gc_tile_Blue_1"), 3)
+    State.roundOrder, State.turn = { "Red", "Blue" }, 1
+    State.riders.Red.gear = 3
+    Events.commitMove("Red", "straight")
+    assert_eq(#getObjectsWithTag("gc_tile_Blue_1"), 0, "oldest tile gone")
+    assert_eq(#getObjectsWithTag("gc_tile_Blue_2"), 0, "the hit tile gone")
+    assert_eq(#getObjectsWithTag("gc_tile_Blue_3"), 3, "front tile stays")
+    assert_eq(#getObjectsWithTag("gc_trail_Red"), 0, "the crasher's line is cleared")
+    local said = false
+    for _, m in ipairs(broadcasts) do if m:find("Blue loses 2 tile", 1, true) then said = true end end
+    assert_true(said)
   end)
 end)

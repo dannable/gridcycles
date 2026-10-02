@@ -1,10 +1,10 @@
 -- tts/spawn.lua
--- Spawning and locking of tiles, Prizms, capture markers, rider minis, mat.
+-- Spawning and locking of tiles, Prizms, rider minis, mat.
 -- All TTS API calls live here. Grey-box visuals (PLAN.md M2): thin tinted blocks
 -- laid along each stored 2D path segment. Game logic never reads these objects.
 --
 -- Every visual carries the tag "gc_visual" plus a group tag so it can be removed:
---   gc_mat, gc_rider_<Color>, gc_trail_<Color>, gc_prizm_<id>, gc_marker_<n>
+--   gc_mat, gc_rider_<Color>, gc_trail_<Color>, gc_prizm_<id>
 
 Spawn = {}
 
@@ -136,31 +136,21 @@ function Spawn.removeTile(color, id)
   Spawn.clearGroup("gc_tile_" .. color .. "_" .. tostring(id))
 end
 
+-- An unscored Prizm is neutral; a scored one is tinted with its owner's colour.
 function Spawn.prizm(prizm)
   local t = Config.tts
   local p = Geom.segmentPose(prizm)
+  local owned = prizm.owner ~= nil
   place({
     position = { p.x, t.tableY + t.matThickness + t.prizmHeight / 2, p.z },
     rotation = { 0, p.heading, 0 },
-    scale = { t.prizmWidth, t.prizmHeight, p.length },
-    name = "Prizm",
-  }, Config.prizmColor, "gc_prizm_" .. prizm.id)
+    scale = { t.prizmWidth * (owned and 1.5 or 1), t.prizmHeight, p.length },
+    name = owned and (prizm.owner .. " Prizm") or "Prizm",
+  }, owned and Config.palette[prizm.owner] or Config.prizmColor, "gc_prizm_" .. prizm.id)
 end
 
 function Spawn.removePrizm(id)
   Spawn.clearGroup("gc_prizm_" .. id)
-end
-
--- Capture marker occupies the Prizm's footprint in the capturer's colour.
-function Spawn.marker(owner, index, seg)
-  local t = Config.tts
-  local p = Geom.segmentPose(seg)
-  place({
-    position = { p.x, t.tableY + t.matThickness + t.markerSize / 4, p.z },
-    rotation = { 0, p.heading, 0 },
-    scale = { t.markerSize, t.markerSize / 2, p.length },
-    name = owner .. " marker",
-  }, Config.palette[owner], "gc_marker_" .. index)
 end
 
 -- The bike is part of its owner's trail: it sits on the end of the last tile with
@@ -340,5 +330,4 @@ function Spawn.rebuild(state)
     for i, color in ipairs(state.order) do Spawn.trayTiles(color, i) end
   end
   for _, p in ipairs(state.prizms) do Spawn.prizm(p) end
-  for i, m in ipairs(state.markers) do Spawn.marker(m.owner, i, m.segs[1]) end
 end

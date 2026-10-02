@@ -27,7 +27,7 @@ describe("Rules.newState", function()
     for _, c in ipairs(st.order) do
       local r = st.riders[c]
       assert_eq(r.gear, 1)
-      assert_eq(r.prizms, 0)
+      assert_eq(Rules.prizmCount(st, c), 0)
       local hw, hd = Config.mat.width / 2, Config.mat.depth / 2
       local tail = Geom.bikeSeg(r.pose).a   -- bike tail starts on the edge
       assert_true(math.abs(math.abs(tail.x) - hw) < 1e-6 or math.abs(math.abs(tail.z) - hd) < 1e-6,
@@ -35,11 +35,29 @@ describe("Rules.newState", function()
       assert_true(Geom.inBounds({ { a = r.pose, b = r.pose } }, Config.mat), "nose inside mat")
     end
   end)
-  it("scatters Config.prizmsOnTable Prizms inside the mat", function()
-    local st = Rules.newState({ "Red" }, function(n) return math.random(n) end)
-    assert_eq(#st.prizms, Config.prizmsOnTable)
-    for _, p in ipairs(st.prizms) do
-      assert_true(Geom.inBounds({ p }, Config.mat))
+  it("starts with one unscored Prizm per rider, evenly spaced on a ring round the centre", function()
+    for n = 1, 4 do
+      local colors = { "Red", "Blue", "Green", "Yellow" }
+      local list = {}
+      for i = 1, n do list[i] = colors[i] end
+      local st = Rules.newState(list, function(k) return math.random(k) end)
+      assert_eq(#st.prizms, n * Config.neutralPrizmsPerPlayer)
+      for _, p in ipairs(st.prizms) do
+        assert_eq(p.owner, nil, "unscored")
+        assert_true(Geom.inBounds({ p }, Config.mat))
+        local cx, cz = (p.a.x + p.b.x) / 2, (p.a.z + p.b.z) / 2
+        assert_near(math.sqrt(cx * cx + cz * cz), Config.prizmRingRadius, 1e-6)
+      end
+      if n >= 2 then
+        for i = 1, n do
+          for j = i + 1, n do
+            local pi, pj = st.prizms[i], st.prizms[j]
+            local d = Geom.distance({ x = (pi.a.x + pi.b.x) / 2, z = (pi.a.z + pi.b.z) / 2 },
+              { x = (pj.a.x + pj.b.x) / 2, z = (pj.a.z + pj.b.z) / 2 })
+            assert_true(d >= Config.tiles[3].straight, "no closer than a gear 3 straight")
+          end
+        end
+      end
     end
   end)
   it("is deterministic for the same rolls", function()
@@ -124,7 +142,10 @@ describe("Rules.resolveMove", function()
     local red = st.riders.Red
     red.pose = { x = 0, z = 17, heading = 0 }
     red.gear = 3
-    red.prizms = 2
+    st.prizms = {
+      { id = 1, owner = "Red", a = { x = -9, z = 0 }, b = { x = -8, z = 0 } },
+      { id = 2, owner = "Red", a = { x = 9, z = 0 }, b = { x = 8, z = 0 } },
+    }
     red.trail.segs = { { a = { x = 0, z = 10 }, b = { x = 0, z = 17 } } }
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
     assert_eq(r.outcome, "crash")
@@ -132,7 +153,7 @@ describe("Rules.resolveMove", function()
     assert_eq(#red.trail.segs, 0)
     assert_eq(#red.trail.tiles, 0)
     assert_eq(red.gear, 1)
-    assert_eq(red.prizms, 2)
+    assert_eq(Rules.prizmCount(st, "Red"), 2, "scored Prizms stay on the table")
     assert_true(r.respawn ~= nil)
   end)
 
@@ -143,18 +164,12 @@ describe("Rules.resolveMove", function()
     assert_eq(r.outcome, "crash")
     assert_eq(r.crashReason, "trail")
     assert_eq(#st.riders.Blue.trail.segs, 1, "opponent trail untouched")
+    assert_eq(r.victim, nil, "a wall with no tile record costs its owner nothing")
   end)
 
   it("crash by hitting your own older trail", function()
     local st = newState()
     st.riders.Red.trail.segs = { { a = { x = -3, z = -9 }, b = { x = 3, z = -9 } } }
-    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
-    assert_eq(r.outcome, "crash")
-  end)
-
-  it("hitting a capture marker crashes", function()
-    local st = newState()
-    st.markers = { { owner = "Blue", segs = { { a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } } } }
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
     assert_eq(r.outcome, "crash")
   end)
@@ -169,43 +184,49 @@ describe("Rules.resolveMove", function()
     assert_eq(#st.riders.Red.trail.tiles, 5)
   end)
 
-  it("capturing a Prizm credits the rider, drops a marker and spawns a replacement", function()
+  it("crossing an unscored Prizm scores it: it takes your colour, stays put, and a new one is tossed", function()
     local st = newState({ { id = 7, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } })
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, function(n) return math.random(n) end)
     assert_eq(r.outcome, "placed")
-    assert_eq(#r.captured, 1)
-    assert_eq(r.captured[1], 7)
-    assert_eq(st.riders.Red.prizms, 1)
-    assert_eq(#st.markers, 1)
-    assert_eq(st.markers[1].owner, "Red")
-    assert_eq(#st.prizms, 1, "replacement spawned")
+    assert_eq(#r.scored, 1)
+    assert_eq(r.scored[1], 7)
+    assert_eq(Rules.prizmCount(st, "Red"), 1)
+    assert_eq(st.prizms[1].id, 7)
+    assert_eq(st.prizms[1].owner, "Red")
+    assert_near(st.prizms[1].a.z, -9, 1e-9)
+    assert_eq(#st.prizms, 2, "scored one stays, replacement added")
     assert_eq(#r.spawned, 1)
-    assert_eq(st.prizms[1].id, 100)
+    assert_eq(st.prizms[2].id, 100)
+    assert_eq(st.prizms[2].owner, nil)
   end)
 
-  it("a Prizm the tile only ends on is not captured", function()
+  it("a Prizm the tile only ends on is not scored (it is nudged clear instead)", function()
     local z = -10 + Config.tiles[1].straight
     local st = newState({ { id = 7, a = { x = -1, z = z }, b = { x = 1, z = z } } })
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
-    assert_eq(#r.captured, 0)
-    assert_eq(#st.prizms, 1)
+    assert_eq(#r.scored, 0)
+    assert_eq(st.prizms[1].owner, nil)
   end)
 
-  it("a crash does not capture Prizms on the failed path", function()
+  it("a crash does not score Prizms on the failed path", function()
     local st = newState({ { id = 7, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } })
     st.riders.Blue.trail.segs = { { a = { x = -3, z = -9.5 }, b = { x = 3, z = -9.5 } } }
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
     assert_eq(r.outcome, "crash")
-    assert_eq(st.riders.Red.prizms, 0)
-    assert_eq(#st.prizms, 1)
+    assert_eq(Rules.prizmCount(st, "Red"), 0)
+    assert_eq(st.prizms[1].owner, nil)
   end)
 
-  it("capturing the final Prizm returns outcome 'win'", function()
-    local st = newState({ { id = 7, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } })
-    st.riders.Red.prizms = Config.prizmsToWin - 1
+  it("holding the target number of your colour wins immediately", function()
+    local st = newState({
+      { id = 7, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } },
+      { id = 8, owner = "Red", a = { x = -9, z = 0 }, b = { x = -8, z = 0 } },
+      { id = 9, owner = "Red", a = { x = 9, z = 0 }, b = { x = 8, z = 0 } },
+    })
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
     assert_eq(r.outcome, "win")
-    assert_eq(st.riders.Red.prizms, Config.prizmsToWin)
+    assert_eq(Rules.prizmCount(st, "Red"), Config.prizmsToWin)
+    assert_eq(st.winner, "Red")
   end)
 
   it("state survives a JSON-style deep copy (no functions or cycles)", function()
@@ -251,39 +272,71 @@ describe("Rules aliasing and multi-capture", function()
     assert_near(st.riders.Red.pose.heading, 0)
     assert_near(st.riders.Red.trail.segs[1].a.x, 0)
   end)
-  it("one tile can capture two Prizms", function()
+  it("one tile can score two Prizms", function()
     local st = newState({
       { id = 1, a = { x = -1, z = -9.5 }, b = { x = 1, z = -9.5 } },
       { id = 2, a = { x = -1, z = -8.5 }, b = { x = 1, z = -8.5 } },
     })
     st.riders.Red.gear = 3
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, function(n) return math.random(n) end)
-    assert_eq(#r.captured, 2)
-    assert_eq(st.riders.Red.prizms, 2)
-    assert_eq(#st.markers, 2)
+    assert_eq(#r.scored, 2)
+    assert_eq(Rules.prizmCount(st, "Red"), 2)
+    assert_eq(#r.spawned, 2, "one new unscored Prizm per Prizm scored")
   end)
 end)
 
 describe("Rules turn order", function()
-  it("starts on the first rider and cycles", function()
+  it("round 1 with everyone in the same gear follows seating order", function()
     local st = Rules.newState({ "Red", "Blue", "Green" }, fixed(3))
     assert_eq(Rules.currentColor(st), "Red")
-    Rules.advanceTurn(st); assert_eq(Rules.currentColor(st), "Blue")
-    Rules.advanceTurn(st); assert_eq(Rules.currentColor(st), "Green")
-    Rules.advanceTurn(st); assert_eq(Rules.currentColor(st), "Red")
+    assert_false(Rules.advanceTurn(st)); assert_eq(Rules.currentColor(st), "Blue")
+    assert_false(Rules.advanceTurn(st)); assert_eq(Rules.currentColor(st), "Green")
   end)
-  it("a solo rider keeps the turn", function()
-    local st = Rules.newState({ "Red" }, fixed(3))
-    Rules.advanceTurn(st)
+  it("after the last rider a new round starts and the tie-breaker moves on one seat", function()
+    local st = Rules.newState({ "Red", "Blue", "Green" }, fixed(3))
+    Rules.advanceTurn(st); Rules.advanceTurn(st)
+    assert_true(Rules.advanceTurn(st), "new round")
+    assert_eq(st.round, 2)
+    assert_eq(table.concat(st.roundOrder, ","), "Blue,Green,Red")
+    Rules.advanceTurn(st); Rules.advanceTurn(st)
+    assert_true(Rules.advanceTurn(st))
+    assert_eq(table.concat(st.roundOrder, ","), "Green,Red,Blue")
+  end)
+  it("the fastest gear goes first; ties go to whoever is nearest the tie-breaker", function()
+    local st = Rules.newState({ "Red", "Blue", "Green" }, fixed(3))
+    st.riders.Red.gear, st.riders.Blue.gear, st.riders.Green.gear = 1, 3, 3
+    Rules.advanceTurn(st); Rules.advanceTurn(st); Rules.advanceTurn(st)
+    assert_eq(table.concat(st.roundOrder, ","), "Blue,Green,Red", "tie-breaker on Blue")
+    st.riders.Red.gear, st.riders.Blue.gear, st.riders.Green.gear = 2, 3, 3
+    Rules.advanceTurn(st); Rules.advanceTurn(st); Rules.advanceTurn(st)
+    assert_eq(table.concat(st.roundOrder, ","), "Green,Blue,Red", "tie-breaker on Green")
+    st.riders.Red.gear, st.riders.Blue.gear, st.riders.Green.gear = 5, 3, 4
+    Rules.advanceTurn(st); Rules.advanceTurn(st); Rules.advanceTurn(st)
+    assert_eq(table.concat(st.roundOrder, ","), "Red,Green,Blue", "gear beats seat")
+  end)
+  it("the order is fixed for the round even if gears change during it", function()
+    local st = Rules.newState({ "Red", "Blue" }, fixed(3))
+    st.riders.Blue.gear = 5
     assert_eq(Rules.currentColor(st), "Red")
+    Rules.advanceTurn(st)
+    assert_eq(Rules.currentColor(st), "Blue")
+  end)
+  it("a solo rider keeps the turn and rounds still count", function()
+    local st = Rules.newState({ "Red" }, fixed(3))
+    assert_true(Rules.advanceTurn(st))
+    assert_eq(Rules.currentColor(st), "Red")
+    assert_eq(st.round, 2)
   end)
   it("winning records the winner and freezes the turn", function()
-    local st = newState({ { id = 7, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } })
-    st.riders.Red.prizms = Config.prizmsToWin - 1
+    local st = newState({
+      { id = 7, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } },
+      { id = 8, owner = "Red", a = { x = -9, z = 0 }, b = { x = -8, z = 0 } },
+      { id = 9, owner = "Red", a = { x = 9, z = 0 }, b = { x = 8, z = 0 } },
+    })
     assert_false(st.winner)
     Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
     assert_eq(st.winner, "Red")
-    Rules.advanceTurn(st)
+    assert_false(Rules.advanceTurn(st))
     assert_eq(Rules.currentColor(st), "Red")
   end)
 end)
@@ -295,6 +348,11 @@ describe("Rules.isValidState", function()
   it("rejects an M2-era state without a turn", function()
     local st = Rules.newState({ "Red" }, fixed(3))
     st.turn = nil
+    assert_false(Rules.isValidState(st))
+  end)
+  it("rejects states from an older version", function()
+    local st = Rules.newState({ "Red" }, fixed(3))
+    st.version = nil
     assert_false(Rules.isValidState(st))
   end)
   it("rejects nil, empty and missing riders", function()
@@ -572,12 +630,206 @@ describe("Prizm capture reach", function()
     return Rules.resolveMove(st, "Red", { shift = 1, kind = "straight" }, fixed(3))   -- G2: z -1 -> 2
   end
   it("captures when the wall's width overlaps the Prizm's end", function()
-    assert_eq(#crossAt(0.9).captured, 1, "0.15 past the end is within the wall half-width")
+    assert_eq(#crossAt(0.9).scored, 1, "0.15 past the end is within the wall half-width")
   end)
   it("does not capture when the wall clears the Prizm", function()
-    assert_eq(#crossAt(1.1).captured, 0)
+    assert_eq(#crossAt(1.1).scored, 0)
   end)
   it("still captures a centred crossing", function()
-    assert_eq(#crossAt(0).captured, 1)
+    assert_eq(#crossAt(0).scored, 1)
+  end)
+end)
+
+describe("Prizm stealing", function()
+  local function prizmAt(id, owner)
+    return { id = id, owner = owner, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } }
+  end
+  it("crossing another rider's scored Prizm steals it, with no new Prizm tossed", function()
+    local st = newState({ prizmAt(7, "Blue") })
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "placed")
+    assert_eq(#r.scored, 0)
+    assert_eq(#r.stolen, 1)
+    assert_eq(r.stolen[1].id, 7); assert_eq(r.stolen[1].from, "Blue")
+    assert_eq(st.prizms[1].owner, "Red")
+    assert_eq(Rules.prizmCount(st, "Red"), 1)
+    assert_eq(Rules.prizmCount(st, "Blue"), 0)
+    assert_eq(#st.prizms, 1)
+    assert_eq(#r.spawned, 0)
+  end)
+  it("crossing your own scored Prizm does nothing", function()
+    local st = newState({ prizmAt(7, "Red") })
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(#r.scored, 0); assert_eq(#r.stolen, 0)
+    assert_eq(Rules.prizmCount(st, "Red"), 1)
+  end)
+  it("stealing the last Prizm you need wins, and the victim is down one", function()
+    local st = newState({
+      prizmAt(7, "Blue"),
+      { id = 8, owner = "Red", a = { x = -9, z = 0 }, b = { x = -8, z = 0 } },
+      { id = 9, owner = "Red", a = { x = 9, z = 0 }, b = { x = 8, z = 0 } },
+      { id = 10, owner = "Blue", a = { x = 0, z = 12 }, b = { x = 1, z = 12 } },
+    })
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "win")
+    assert_eq(Rules.prizmCount(st, "Blue"), 1)
+  end)
+  it("a rider keeps scored Prizms when they crash, and they can be stolen later", function()
+    local st = newState({ prizmAt(7, "Red") })
+    st.riders.Red.pose = { x = 0, z = 17, heading = 0 }
+    Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))   -- off the mat
+    assert_eq(Rules.prizmCount(st, "Red"), 1)
+    st.riders.Blue.pose = { x = 0, z = -10, heading = 0 }
+    local r = Rules.resolveMove(st, "Blue", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(#r.stolen, 1)
+    assert_eq(Rules.prizmCount(st, "Red"), 0)
+  end)
+end)
+
+describe("Prizm pass-through", function()
+  local wall = { { a = { x = -3, z = -9 }, b = { x = 3, z = -9 } } }
+  it("contact on top of a Prizm is not a crash", function()
+    local st = newState({ { id = 7, a = { x = -0.75, z = -9 }, b = { x = 0.75, z = -9 } } })
+    st.riders.Blue.trail.segs = wall
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "placed")
+    assert_eq(#r.scored, 1)
+  end)
+  it("the same wall without a Prizm on it is a crash", function()
+    local st = newState()
+    st.riders.Blue.trail.segs = wall
+    assert_eq(Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3)).outcome, "crash")
+  end)
+  it("a Prizm that is not where the lines meet does not help", function()
+    local st = newState({ { id = 7, a = { x = 1, z = -9.75 }, b = { x = 1, z = -8.25 } } })
+    st.riders.Blue.trail.segs = wall
+    assert_eq(Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3)).outcome, "crash")
+  end)
+end)
+
+describe("crash victims lose pieces", function()
+  -- Blue lays three tiles heading -z from (10,10): G1 z10-8 (id 1), G2 z8-5 (id 2), G3 z5-1 (id 3)
+  local function blueLine()
+    local st = newState()
+    for _, shift in ipairs({ 0, 1, 1 }) do
+      assert_eq(Rules.resolveMove(st, "Blue", { shift = shift, kind = "straight" }, fixed(3)).outcome, "placed")
+    end
+    return st
+  end
+  local function redCrossesAt(st, z)
+    st.riders.Red.pose = { x = 7, z = z, heading = 90 }
+    st.riders.Red.gear = 3
+    return Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))   -- G3: x 7 -> 11
+  end
+  local function ids(rider)
+    local t = {}
+    for i, tile in ipairs(rider.trail.tiles) do t[i] = tile.id end
+    return table.concat(t, ",")
+  end
+
+  it("the hit tile and every older one come off; the front tile stays", function()
+    local st = blueLine()
+    local r = redCrossesAt(st, 6.5)               -- hits tile 2
+    assert_eq(r.outcome, "crash"); assert_eq(r.crashReason, "trail"); assert_eq(r.crashOwner, "Blue")
+    assert_eq(r.victim.color, "Blue")
+    assert_eq(table.concat(r.victim.removedTiles, ","), "1,2")
+    assert_eq(ids(st.riders.Blue), "3")
+    assert_eq(#st.riders.Blue.trail.segs, 1, "wall rebuilt from the surviving tile")
+    assert_eq(st.riders.Blue.trail.segs[1].tile, 3)
+    assert_eq(#st.riders.Red.trail.tiles, 0, "the crasher loses everything too")
+  end)
+  it("pieces come back to the victim's supply", function()
+    local st = blueLine()
+    local b = st.riders.Blue
+    assert_eq(b.supply[1].straight, Config.tileSupply[1].straight - 1)
+    redCrossesAt(st, 6.5)
+    assert_eq(b.supply[1].straight, Config.tileSupply[1].straight)
+    assert_eq(b.supply[2].straight, Config.tileSupply[2].straight)
+    assert_eq(b.supply[3].straight, Config.tileSupply[3].straight - 1, "front tile still out")
+  end)
+  it("hitting the oldest tile costs only that one", function()
+    local st = blueLine()
+    local r = redCrossesAt(st, 9)
+    assert_eq(table.concat(r.victim.removedTiles, ","), "1")
+    assert_eq(ids(st.riders.Blue), "2,3")
+  end)
+  it("hitting the front tile strips everything behind it but never the front tile", function()
+    local st = blueLine()
+    local r = redCrossesAt(st, 3)
+    assert_eq(r.crashReason, "trail")
+    assert_eq(table.concat(r.victim.removedTiles, ","), "1,2")
+    assert_eq(ids(st.riders.Blue), "3")
+  end)
+  it("a lone tile that is hit stays (it is the front tile)", function()
+    local st = newState()
+    Rules.resolveMove(st, "Blue", { shift = 0, kind = "straight" }, fixed(3))   -- z 10 -> 8
+    local r = redCrossesAt(st, 9)
+    assert_eq(#r.victim.removedTiles, 0)
+    assert_eq(ids(st.riders.Blue), "1")
+  end)
+  it("hitting a bike or your own trail costs nobody else anything", function()
+    local st = newState()
+    local r = redCrossesAt(st, 11)                -- Blue's bike, no tiles laid
+    assert_eq(r.crashReason, "bike")
+    assert_eq(r.victim, nil)
+    st = newState()
+    Rules.resolveMove(st, "Red", { shift = 1, kind = "straight" }, fixed(3))   -- z -10 -> -7
+    st.riders.Red.pose = { x = 3, z = -8.5, heading = 270 }
+    r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(r.crashOwner, "Red")
+    assert_eq(r.victim, nil)
+  end)
+  it("a victim keeps scored Prizms", function()
+    local st = blueLine()
+    st.prizms = { { id = 1, owner = "Blue", a = { x = -9, z = 0 }, b = { x = -8, z = 0 } } }
+    redCrossesAt(st, 6.5)
+    assert_eq(Rules.prizmCount(st, "Blue"), 1)
+  end)
+end)
+
+describe("Prizm nudge", function()
+  local function beside(x)   -- a neutral Prizm running along z, alongside Red's tile (x=0, z -10..-8)
+    return { id = 7, a = { x = x, z = -9.5 }, b = { x = x, z = -8.5 } }
+  end
+  it("a Prizm touched but not crossed is pushed clear of the wall", function()
+    local st = newState({ beside(0.2) })
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(#r.scored, 0)
+    assert_eq(#r.nudged, 1); assert_eq(r.nudged[1], 7)
+    local p = st.prizms[1]
+    assert_true(Geom.pathDistance(r.segs, p) >= Config.prizm.nudgeClear - 1e-6, "clear of the wall")
+    assert_true((p.a.x + p.b.x) / 2 > 0.2, "pushed away from the wall")
+    assert_near(p.b.z - p.a.z, 1.0, 1e-9, "same size and orientation")
+    assert_eq(p.owner, nil)
+  end)
+  it("a Prizm that is already clear is left alone", function()
+    local st = newState({ beside(2) })
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(#r.nudged, 0)
+    assert_near(st.prizms[1].a.x, 2)
+  end)
+  it("a scored Prizm sitting on its owner's own line is locked and stays", function()
+    local st = newState({ { id = 7, owner = "Red", a = { x = -0.75, z = -9 }, b = { x = 0.75, z = -9 } } })
+    st.riders.Red.trail.segs = { { a = { x = 0, z = -10 }, b = { x = 0, z = -8 } } }
+    st.riders.Blue.pose = { x = 3, z = -9.3, heading = 270 }   -- runs alongside the Prizm, not across it
+    local r = Rules.resolveMove(st, "Blue", { shift = 1, kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "placed")
+    assert_eq(#r.nudged, 0)
+    assert_near(st.prizms[1].a.x, -0.75)
+  end)
+  it("a Prizm touched by two riders' lines is locked and stays", function()
+    local st = newState({ beside(0.2) })
+    st.riders.Blue.trail.segs = { { a = { x = 0.5, z = -9.2 }, b = { x = 0.5, z = -8.8 } } }
+    local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "placed")
+    assert_eq(#r.nudged, 0)
+    assert_near(st.prizms[1].a.x, 0.2)
+  end)
+  it("a nudged Prizm does not land on another Prizm or off the mat", function()
+    local st = newState({ beside(0.2), { id = 8, a = { x = 1.0, z = -9.5 }, b = { x = 1.0, z = -8.5 } } })
+    Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
+    local a, b = st.prizms[1], st.prizms[2]
+    assert_true(Geom.segmentDistance(a, b) >= Config.prizm.nudgeClear - 1e-6, "clear of the other Prizm")
+    assert_true(Geom.inBounds({ a }, Config.mat))
   end)
 end)

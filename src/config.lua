@@ -5,7 +5,8 @@
 
 Config = {
   prizmsToWin = 3,
-  prizmsOnTable = 5,
+  neutralPrizmsPerPlayer = 1,   -- unscored Prizms on the table, per rider; a scored one is replaced
+  prizmRingRadius = 6,          -- the starting neutral Prizms sit evenly spaced on a ring this wide
   maxPlayers = 4,
 
   mat = { width = 36, depth = 36 },        -- play area, centred on origin
@@ -47,7 +48,10 @@ Config = {
   -- Prizm modelled as a segment of this length. A path that crosses the Prizm's
   -- long axis within endSlack of an end still captures: set to half the wall width
   -- (tts.trailWidth / 2) so a wall visibly touching the Prizm counts.
-  prizm = { length = 1.5, endSlack = 0.175 },
+  -- Contact within passRadius of a Prizm never crashes (it is a gap in any wall). A
+  -- tile that comes within touchDist of an unscored, unlocked Prizm without scoring
+  -- nudges it away until it is nudgeClear from every wall.
+  prizm = { length = 1.5, endSlack = 0.175, passRadius = 0.4, touchDist = 0.33, nudgeClear = 0.55 },
 
   -- The bike is part of its owner's trail: a segment this long ending at the trail
   -- end (nose on the exit of the last tile, tail back over it). Other riders crash

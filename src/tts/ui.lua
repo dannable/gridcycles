@@ -68,11 +68,12 @@ end
 
 local function statusXml()
   return [[
-<Panel id="gcStatusPanel" active="false" width="360" height="250" rectAlignment="UpperRight"
+<Panel id="gcStatusPanel" active="false" width="360" height="272" rectAlignment="UpperRight"
        offsetXY="-20 -70" color="#0A0618D9" padding="10 10 10 10">
   <VerticalLayout spacing="4">
     <Text id="gcStatus" fontSize="18" color="#05D9E8" alignment="MiddleCenter" preferredHeight="28">Gridcycles</Text>
     <Text id="gcScore" fontSize="14" color="#D9C8FF" alignment="MiddleCenter" preferredHeight="22"></Text>
+    <Text id="gcOrder" fontSize="13" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="20"></Text>
     <Text id="gcLog" fontSize="13" color="#FFFFFF" alignment="UpperLeft"></Text>
     <Button id="gcl_menu" onClick="gcClick" color="#444444" textColor="#FFFFFF" fontSize="14" preferredHeight="26">Back to lobby (host)</Button>
   </VerticalLayout>
@@ -182,9 +183,10 @@ function UI_.refresh()
   end
   local parts = {}
   for _, c in ipairs(State.order) do
-    parts[#parts + 1] = string.format("%s %d/%d", c, State.riders[c].prizms, Config.prizmsToWin)
+    parts[#parts + 1] = string.format("%s %d/%d", c, Rules.prizmCount(State, c), Config.prizmsToWin)
   end
   UI.setValue("gcScore", "Prizms: " .. table.concat(parts, "  "))
+  UI.setValue("gcOrder", string.format("Round %d: %s", State.round, table.concat(State.roundOrder, " > ")))
   UI.setValue("gcLog", table.concat(logLines, "\n"))
 
   for _, c in ipairs(State.order) do

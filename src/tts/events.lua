@@ -71,7 +71,7 @@ end
 local function syncTurns()
   if State == nil then return end
   local order = {}
-  for i, c in ipairs(State.order) do order[i] = c end   -- copy: don't hand TTS our live table
+  for i, c in ipairs(State.roundOrder) do order[i] = c end   -- copy: don't hand TTS our live table
   Turns.enable = true
   Turns.type = 2                       -- custom order
   Turns.order = order
@@ -113,8 +113,8 @@ function Events.newGame(colors)
   Spawn.rebuild(State)
   syncTurns()
   UI_.rebuild(State.order)
-  say("New game: " .. table.concat(colors, ", ") .. ". First to " .. Config.prizmsToWin
-    .. " Prizms wins. " .. colors[1] .. " goes first.", rgb(colors[1]))
+  say("New game: " .. table.concat(colors, ", ") .. ". First to hold " .. Config.prizmsToWin
+    .. " Prizms of their colour wins. " .. State.roundOrder[1] .. " goes first.", rgb(State.roundOrder[1]))
 end
 
 -- Lobby button presses. Settings are host-only.
@@ -197,16 +197,36 @@ local function describe(color, move, r)
     elseif r.crashReason == "supply" then why = "no tile available" end
     parts[#parts + 1] = "CRASH (" .. why .. "), respawning"
   end
-  if #r.captured > 0 then
-    parts[#parts + 1] = "captured " .. #r.captured .. " Prizm(s)"
+  if r.scored and #r.scored > 0 then
+    parts[#parts + 1] = "scored " .. #r.scored .. " Prizm(s)"
+  end
+  for _, st in ipairs(r.stolen or {}) do
+    parts[#parts + 1] = "STOLE a Prizm from " .. st.from
+  end
+  if r.nudged and #r.nudged > 0 then
+    parts[#parts + 1] = "nudged " .. #r.nudged .. " Prizm(s) clear"
+  end
+  if r.victim and #r.victim.removedTiles > 0 then
+    parts[#parts + 1] = r.victim.color .. " loses " .. #r.victim.removedTiles .. " tile(s)"
   end
   local what = (r.shape and r.shape ~= "straight" and (r.shape .. " ") or "") .. (r.kind or move.kind)
   return color .. " " .. what .. " (G" .. tostring(r.tileGear or r.gear) .. " tile)"
     .. (#parts > 0 and (": " .. table.concat(parts, ", ")) or "")
 end
 
+-- Redraw a Prizm from state (new owner colour, or a new spot after a nudge).
+local function refreshPrizm(id)
+  Spawn.removePrizm(id)
+  for _, p in ipairs(State.prizms) do
+    if p.id == id then Spawn.prizm(p) end
+  end
+end
+
 -- Mirror a Rules result onto the table.
 local function apply(color, r)
+  if r.victim then
+    for _, id in ipairs(r.victim.removedTiles) do Spawn.removeTile(r.victim.color, id) end
+  end
   if r.outcome == "crash" then
     Spawn.clearTrail(color)
     Spawn.rider(color, r.respawn)
@@ -215,12 +235,16 @@ local function apply(color, r)
   for _, id in ipairs(r.removedTiles or {}) do Spawn.removeTile(color, id) end
   Spawn.tile(color, r.segs, r.tileGear, r.shape, State.riders[color].nextTileId - 1)
   Spawn.rider(color, r.exitPose)
-  for _, id in ipairs(r.captured) do Spawn.removePrizm(id) end
-  local first = #State.markers - #r.captured + 1
-  for i = 1, #r.captured do
-    Spawn.marker(color, first + i - 1, State.markers[first + i - 1].segs[1])
-  end
+  for _, id in ipairs(r.scored) do refreshPrizm(id) end
+  for _, st in ipairs(r.stolen) do refreshPrizm(st.id) end
+  for _, id in ipairs(r.nudged) do refreshPrizm(id) end
   for _, p in ipairs(r.spawned) do Spawn.prizm(p) end
+end
+
+-- "Round 2 order: Red, Blue." Logged whenever a round starts.
+local function announceRound()
+  say("Round " .. State.round .. " order: " .. table.concat(State.roundOrder, ", ") .. ".",
+    rgb(State.roundOrder[1]))
 end
 
 -- playerColor: the TTS colour of whoever clicked. kind: "straight"|"left"|"right";
@@ -235,11 +259,13 @@ function Events.commitMove(playerColor, kind, curve)
   say(describe(color, move, r), rgb(color))
   if r.outcome == "win" then
     say("=== " .. string.upper(color) .. " WINS with "
-      .. State.riders[color].prizms .. " Prizms! Host: Back to lobby to race again. ===", rgb(color))
+      .. Rules.prizmCount(State, color) .. " Prizms! Host: Back to lobby to race again. ===", rgb(color))
   else
-    Rules.advanceTurn(State)
+    local newRound = Rules.advanceTurn(State)
     local nxt = Rules.currentColor(State)
-    if nxt ~= color then
+    if newRound and #State.order > 1 then
+      announceRound()
+    elseif nxt ~= color then
       say(nxt .. "'s turn.", rgb(nxt))
     end
   end

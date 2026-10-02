@@ -6,20 +6,29 @@
 --
 -- State (plain tables, JSON-safe):
 --   state = {
---     order   = { color... },
---     riders  = { [color] = { gear, pose = {x,z,heading}, prizms = n,
+--     version = Rules.STATE_VERSION,
+--     order   = { color... },         -- seating order (clockwise); never changes
+--     roundOrder = { color... },      -- who plays this round, fastest gear first
+--     turn = n,                       -- index into roundOrder
+--     round = n, tieBreaker = n,      -- tieBreaker: index into order, rotates each round
+--     riders  = { [color] = { gear, pose = {x,z,heading},
 --                             supply = { [gear] = { straight = n, soft = n, hard = n } },
 --                             nextTileId = n,
---                             trail = { segs = {Segment...},
+--                             trail = { segs = {Segment...},   -- flat, each seg carries its tile id
 --                                       tiles = { {id, kind, shape, gear, entry} ... } } } },  -- oldest first
---     prizms  = { { id, a = Point, b = Point } ... },
---     markers = { { owner = color, segs = { Segment } } ... },   -- capture markers, block like trails
+--     prizms  = { { id, a = Point, b = Point, owner = color|nil } ... },   -- owner nil = unscored
 --     nextPrizmId = n,
+--     winner = color|false,
 --   }
 --
 -- Pieces: every tile has a gear and a shape ("straight" | "soft" | "hard"); riders own a
 -- limited supply of each (Config.tileSupply). See Rules.planPiece for what happens
 -- when the wanted piece has run out.
+--
+-- Prizms: crossing an unscored Prizm scores it (it takes your colour and stays where it
+-- is); crossing someone else's scored Prizm steals it. You win with Config.prizmsToWin
+-- of your colour on the table at once. Contact on top of any Prizm never crashes.
+-- A rider's bike is part of their trail (Geom.bikeSeg), blocking everyone but its owner.
 --
 -- Rules.resolveMove(state, color, move, rollFn) -> result
 --   move   = { shift = -1|0|1, kind = "straight"|"left"|"right", curve = "soft"|"hard" }
@@ -28,14 +37,17 @@
 --              kind (the tile actually laid), tileGear / shape (the piece used),
 --              substituted (true if a lower gear or other curve shape was used),
 --              removedTiles = { id... } (oldest tiles given up to get a piece),
---              segs, exitPose, captured = {prizmIds...}, spawned = {prizm...},
+--              segs, exitPose,
+--              scored = { prizmId... }  (unscored Prizms you took),
+--              stolen = { { id, from = color } ... },
+--              nudged = { prizmId... }, spawned = { prizm... } (new unscored Prizms),
 --              crashReason = "bounds"|"trail"|"bike"|"supply" (crash only), crashOwner = colour
---              whose trail/marker/bike was hit (not for "bounds"), respawn = pose (crash only) }
---
--- A rider's bike is part of their trail: Geom.bikeSeg(rider.pose), nose on the trail
--- end. It blocks every other rider but never its owner.
+--              whose trail/bike was hit (not for "bounds"), respawn = pose (crash only),
+--              victim = { color, removedTiles = { id... } } (crash into someone else's trail) }
 
 Rules = {}
+
+Rules.STATE_VERSION = 3
 
 local function clamp(v, lo, hi)
   if v < lo then return lo elseif v > hi then return hi end
@@ -47,7 +59,7 @@ local function rand(rollFn)
   return (rollFn(10000) - 1) / 9999
 end
 
--- Everything a new path can crash into: every trail, capture marker and bike.
+-- Everything a new path can crash into: every trail and every bike.
 -- `exclude` names a rider whose own bike is left out (it never blocks its owner:
 -- the owner's next tile starts on the bike's nose).
 local function allTrails(state, exclude)
@@ -62,10 +74,25 @@ local function allTrails(state, exclude)
       list[#list + 1] = { owner = color, kind = "bike", segs = { Geom.bikeSeg(r.pose) } }
     end
   end
-  for _, m in ipairs(state.markers) do
-    list[#list + 1] = { owner = m.owner, segs = m.segs }
-  end
   return list
+end
+
+-- Contact right on top of a Prizm is harmless: a Prizm is a gap in any wall.
+local function passFn(state)
+  return function(pt)
+    for _, p in ipairs(state.prizms) do
+      if Geom.pointSegDist(pt, p) <= Config.prizm.passRadius then return true end
+    end
+    return false
+  end
+end
+
+function Rules.prizmCount(state, color)
+  local n = 0
+  for _, p in ipairs(state.prizms) do
+    if p.owner == color then n = n + 1 end
+  end
+  return n
 end
 
 -- Random edge launch, heading inward, with the bike's tail on the edge (so the
@@ -94,27 +121,36 @@ local function randomLaunch(state, rollFn, exclude)
   return pose
 end
 
--- Random Prizm: centred away from the mat edge, random orientation, clear of
--- trails, markers and other Prizms.
+-- Is a Prizm segment clear of every wall and bike (by nudgeClear), every other
+-- Prizm, and inside the mat? `ignoreId` skips the Prizm being moved.
+local function prizmFits(state, seg, ignoreId)
+  if not Geom.inBounds({ seg }, Config.mat) then return false end
+  for _, t in ipairs(allTrails(state)) do
+    if Geom.pathDistance(t.segs, seg) < Config.prizm.nudgeClear then return false end
+  end
+  for _, p in ipairs(state.prizms) do
+    if p.id ~= ignoreId and Geom.segmentDistance(seg, p) < Config.prizm.nudgeClear then return false end
+  end
+  return true
+end
+
+local function newPrizmSeg(cx, cz, ang)
+  local half = Config.prizm.length / 2
+  local dx, dz = math.sin(ang) * half, math.cos(ang) * half
+  return { a = { x = cx - dx, z = cz - dz }, b = { x = cx + dx, z = cz + dz } }
+end
+
+-- Toss a new unscored Prizm at a random free spot away from the mat edge.
 local function randomPrizm(state, rollFn)
   local mat = Config.mat
   local hw = mat.width / 2 - Config.prizmEdgeMargin
   local hd = mat.depth / 2 - Config.prizmEdgeMargin
-  local half = Config.prizm.length / 2
   local prizm
   for _ = 1, Config.spawnTries do
     local cx = (rand(rollFn) * 2 - 1) * hw
     local cz = (rand(rollFn) * 2 - 1) * hd
-    local ang = rand(rollFn) * math.pi
-    local dx, dz = math.sin(ang) * half, math.cos(ang) * half
-    local seg = { a = { x = cx - dx, z = cz - dz }, b = { x = cx + dx, z = cz + dz } }
-    local blocked = Geom.pathHitsTrails({ seg }, allTrails(state), nil)
-    if not blocked then
-      for _, p in ipairs(state.prizms) do
-        if Geom.segmentsIntersect(seg, p) then blocked = true; break end
-      end
-    end
-    if not blocked then
+    local seg = newPrizmSeg(cx, cz, rand(rollFn) * math.pi)
+    if prizmFits(state, seg) then
       prizm = seg
       break
     end
@@ -182,10 +218,17 @@ function Rules.planPiece(rider, want, shape, gear)
   end
 end
 
+-- Segments of a tile, each tagged with the tile's id so a hit can be traced back to it.
+local function tileSegs(tile)
+  local segs = Geom.tilePath(tile.kind, tile.gear, tile.entry, tile.shape)
+  for _, sg in ipairs(segs) do sg.tile = tile.id end
+  return segs
+end
+
 local function segsOf(tiles)
   local segs = {}
   for _, t in ipairs(tiles) do
-    for _, sg in ipairs((Geom.tilePath(t.kind, t.gear, t.entry, t.shape))) do segs[#segs + 1] = sg end
+    for _, sg in ipairs(tileSegs(t)) do segs[#segs + 1] = sg end
   end
   return segs
 end
@@ -202,15 +245,47 @@ local function removeOldest(rider, n)
   return ids
 end
 
+-- Someone crashed into tile `tileId` of `owner`'s line: that tile and every older one
+-- come off, but their front-most tile always stays. Returns the removed ids.
+local function hitVictim(state, owner, tileId)
+  local rider = state.riders[owner]
+  local idx
+  for i, t in ipairs(rider.trail.tiles) do
+    if t.id == tileId then idx = i end
+  end
+  if idx == nil then return {} end
+  return removeOldest(rider, math.min(idx, #rider.trail.tiles - 1))
+end
+
+-- Round order: fastest gear first. Ties go to whoever comes first clockwise from the
+-- tie-breaker marker (which moves one seat on after every round).
+local function startRound(state)
+  local n = #state.order
+  local keyed = {}
+  for i, c in ipairs(state.order) do
+    keyed[i] = { color = c, gear = state.riders[c].gear, away = (i - state.tieBreaker) % n }
+  end
+  table.sort(keyed, function(a, b)
+    if a.gear ~= b.gear then return a.gear > b.gear end
+    return a.away < b.away
+  end)
+  state.roundOrder = {}
+  for i, k in ipairs(keyed) do state.roundOrder[i] = k.color end
+  state.turn = 1
+end
+
 function Rules.newState(colors, rollFn)
   rollFn = rollFn or function(n) return math.random(n) end
   local state = {
+    version = Rules.STATE_VERSION,
     order = {},
+    roundOrder = {},
     riders = {},
     prizms = {},
-    markers = {},
     nextPrizmId = 1,
-    turn = 1,          -- index into order
+    turn = 1,          -- index into roundOrder
+    round = 1,
+    tieBreaker = 1,
     winner = false,    -- colour of the winner once the game is won
   }
   for i, c in ipairs(colors) do state.order[i] = c end
@@ -218,21 +293,29 @@ function Rules.newState(colors, rollFn)
     state.riders[c] = {
       gear = Config.gears.min,
       pose = nil,
-      prizms = 0,
       supply = fullSupply(),
       nextTileId = 1,
       trail = { segs = {}, tiles = {} },
     }
     state.riders[c].pose = randomLaunch(state, rollFn, c)
   end
-  for _ = 1, Config.prizmsOnTable do
-    local p = randomPrizm(state, rollFn)
-    if p then state.prizms[#state.prizms + 1] = p end
+  -- unscored Prizms: evenly spaced on a ring around the centre, random orientation
+  local count = #state.order * Config.neutralPrizmsPerPlayer
+  local start = rand(rollFn) * 2 * math.pi
+  for i = 1, count do
+    local a = start + (i - 1) * 2 * math.pi / count
+    local seg = newPrizmSeg(math.sin(a) * Config.prizmRingRadius, math.cos(a) * Config.prizmRingRadius,
+      rand(rollFn) * math.pi)
+    seg.id = state.nextPrizmId
+    state.nextPrizmId = state.nextPrizmId + 1
+    state.prizms[#state.prizms + 1] = seg
   end
+  startRound(state)
   return state
 end
 
 -- Wipe the rider's trail (returning their whole tile supply) and respawn them.
+-- Scored Prizms stay on the table.
 function Rules.crash(state, color, reason, owner, rollFn)
   local rider = state.riders[color]
   rider.trail = { segs = {}, tiles = {} }
@@ -241,9 +324,66 @@ function Rules.crash(state, color, reason, owner, rollFn)
   rider.pose = randomLaunch(state, rollFn, color)
   return {
     outcome = "crash", crashReason = reason, crashOwner = owner,
-    gear = rider.gear, captured = {}, spawned = {},
+    gear = rider.gear, captured = {}, spawned = {}, scored = {}, stolen = {}, nudged = {},
     respawn = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading },
   }
+end
+
+-- Is this Prizm locked (it will not be nudged)? Yes if it sits on its owner's own line,
+-- or lines of two different colours touch it.
+local function isLocked(state, prizm)
+  local touching = {}
+  local n = 0
+  for _, c in ipairs(state.order) do
+    local segs = state.riders[c].trail.segs
+    if #segs > 0 and Geom.pathDistance(segs, prizm) <= Config.prizm.touchDist then
+      if prizm.owner == c then return true end
+      touching[c] = true
+      n = n + 1
+    end
+  end
+  return n >= 2
+end
+
+-- Push a free Prizm away from the path that touched it, as little as possible, until
+-- it clears every wall by nudgeClear. Returns true if it moved.
+local function nudge(state, prizm, path)
+  -- nearest point of the new path to the Prizm's centre
+  local cx, cz = (prizm.a.x + prizm.b.x) / 2, (prizm.a.z + prizm.b.z) / 2
+  local best, bx, bz = math.huge, 0, 0
+  for _, s in ipairs(path) do
+    local dx, dz = s.b.x - s.a.x, s.b.z - s.a.z
+    local len2 = dx * dx + dz * dz
+    local t = len2 > 0 and clamp(((cx - s.a.x) * dx + (cz - s.a.z) * dz) / len2, 0, 1) or 0
+    local px, pz = s.a.x + t * dx, s.a.z + t * dz
+    local d = math.sqrt((cx - px) ^ 2 + (cz - pz) ^ 2)
+    if d < best then best, bx, bz = d, px, pz end
+  end
+  local ux, uz
+  if best > 1e-6 then
+    ux, uz = (cx - bx) / best, (cz - bz) / best
+  else                                  -- centred on the wall: push sideways off the axis
+    local ax, az = prizm.b.x - prizm.a.x, prizm.b.z - prizm.a.z
+    local l = math.sqrt(ax * ax + az * az)
+    ux, uz = -az / l, ax / l
+  end
+  -- try straight away first, then fan out either side
+  for _, turn in ipairs({ 0, 30, -30, 60, -60, 90, -90 }) do
+    local th = math.rad(turn)
+    local vx = ux * math.cos(th) - uz * math.sin(th)
+    local vz = ux * math.sin(th) + uz * math.cos(th)
+    for step = 0, 80 do
+      local d = step * 0.05
+      local seg = { a = { x = prizm.a.x + vx * d, z = prizm.a.z + vz * d },
+                    b = { x = prizm.b.x + vx * d, z = prizm.b.z + vz * d } }
+      if prizmFits(state, seg, prizm.id) then
+        if d == 0 then return false end
+        prizm.a, prizm.b = seg.a, seg.b
+        return true
+      end
+    end
+  end
+  return false
 end
 
 function Rules.resolveMove(state, color, move, rollFn)
@@ -288,72 +428,77 @@ function Rules.resolveMove(state, color, move, rollFn)
   local result = {
     gear = gear, tileGear = pieceGear, shape = pieceShape, substituted = substituted,
     removedTiles = removedTiles, roll = roll, spunOut = spunOut, wentStraight = wentStraight,
-    kind = kind, segs = segs, exitPose = exitPose, captured = {}, spawned = {},
+    kind = kind, segs = segs, exitPose = exitPose,
+    scored = {}, stolen = {}, nudged = {}, spawned = {},
   }
 
   -- 4. crash checks
-  local crashReason, crashOwner
+  local crashReason, crashOwner, hitTile
   if not Geom.inBounds(segs, Config.mat) then
     crashReason = "bounds"
   else
-    local hit, trail = Geom.pathHitsTrails(segs, allTrails(state, color),
-      { x = rider.pose.x, z = rider.pose.z })
+    local hit, trail, oldSeg = Geom.pathHitsTrails(segs, allTrails(state, color),
+      { x = rider.pose.x, z = rider.pose.z }, passFn(state))
     if hit then
       crashReason = trail.kind == "bike" and "bike" or "trail"
       crashOwner = trail.owner
+      if crashReason == "trail" and trail.owner ~= color then hitTile = oldSeg.tile end
     end
   end
   if crashReason then
+    local victimRemoved
+    if hitTile then victimRemoved = hitVictim(state, crashOwner, hitTile) end
     local r = Rules.crash(state, color, crashReason, crashOwner, rollFn)
     r.segs, r.exitPose, r.kind, r.tileGear, r.shape = segs, exitPose, kind, pieceGear, pieceShape
     r.roll, r.spunOut, r.wentStraight = roll, spunOut, wentStraight
     r.substituted, r.removedTiles = substituted, removedTiles
+    if victimRemoved then r.victim = { color = crashOwner, removedTiles = victimRemoved } end
     return r
   end
 
   -- 5. place tile
   local entry = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading }
-  for _, s in ipairs(segs) do
-    rider.trail.segs[#rider.trail.segs + 1] = { a = { x = s.a.x, z = s.a.z }, b = { x = s.b.x, z = s.b.z } }
-  end
-  rider.trail.tiles[#rider.trail.tiles + 1] = {
+  local tile = {
     id = rider.nextTileId, kind = kind, shape = pieceShape, gear = pieceGear, entry = entry,
   }
   rider.nextTileId = rider.nextTileId + 1
+  rider.trail.tiles[#rider.trail.tiles + 1] = tile
+  for _, sg in ipairs(tileSegs(tile)) do rider.trail.segs[#rider.trail.segs + 1] = sg end
   rider.supply[pieceGear][pieceShape] = rider.supply[pieceGear][pieceShape] - 1
   rider.pose = { x = exitPose.x, z = exitPose.z, heading = exitPose.heading }
   rider.gear = spunOut and Config.gears.min or gear
   result.gear = rider.gear
   result.outcome = "placed"
 
-  -- 6. captures (a marker replaces the Prizm and blocks like a trail)
-  local remaining = {}
-  local captured = {}
+  -- 6. scoring: cross an unscored Prizm to take it, someone else's to steal it
+  local took = {}
   for _, p in ipairs(state.prizms) do
-    if Geom.pathCrossesPrizm(segs, p, Config.prizm.endSlack) then
-      captured[#captured + 1] = p
-    else
-      remaining[#remaining + 1] = p
+    if p.owner ~= color and Geom.pathCrossesPrizm(segs, p, Config.prizm.endSlack) then
+      if p.owner == nil then
+        result.scored[#result.scored + 1] = p.id
+      else
+        result.stolen[#result.stolen + 1] = { id = p.id, from = p.owner }
+      end
+      p.owner = color
+      took[p.id] = true
     end
   end
-  state.prizms = remaining
-  for _, p in ipairs(captured) do
-    rider.prizms = rider.prizms + 1
-    state.markers[#state.markers + 1] = {
-      owner = color,
-      segs = { { a = { x = p.a.x, z = p.a.z }, b = { x = p.b.x, z = p.b.z } } },
-    }
-    result.captured[#result.captured + 1] = p.id
-  end
 
-  if rider.prizms >= Config.prizmsToWin then
+  if Rules.prizmCount(state, color) >= Config.prizmsToWin then
     result.outcome = "win"
     state.winner = color
     return result
   end
 
-  -- 7. top the table back up
-  for _ = 1, #captured do
+  -- 7. a tile that touched an unscored, unlocked Prizm without taking it nudges it clear
+  for _, p in ipairs(state.prizms) do
+    if not took[p.id] and Geom.pathDistance(segs, p) <= Config.prizm.touchDist and not isLocked(state, p) then
+      if nudge(state, p, segs) then result.nudged[#result.nudged + 1] = p.id end
+    end
+  end
+
+  -- 8. top the table back up: a new unscored Prizm for each one scored
+  for _ = 1, #result.scored do
     local np = randomPrizm(state, rollFn)
     if np then
       state.prizms[#state.prizms + 1] = np
@@ -364,23 +509,33 @@ function Rules.resolveMove(state, color, move, rollFn)
 end
 
 function Rules.currentColor(state)
-  return state.order[state.turn]
+  return state.roundOrder[state.turn]
 end
 
--- Pass play to the next rider in seating order. No-op once the game is won.
+-- Pass play to the next rider this round; after the last, start a new round (the order
+-- is re-sorted by gear and the tie-breaker moves on). Returns true if a new round began.
+-- No-op once the game is won.
 function Rules.advanceTurn(state)
-  if state.winner then return end
-  state.turn = state.turn % #state.order + 1
+  if state.winner then return false end
+  if state.turn < #state.roundOrder then
+    state.turn = state.turn + 1
+    return false
+  end
+  state.tieBreaker = state.tieBreaker % #state.order + 1
+  state.round = state.round + 1
+  startRound(state)
+  return true
 end
 
 -- True if `state` (e.g. decoded from a save) has the shape this version expects.
 -- Older or corrupt saves fail this and the game starts fresh.
 function Rules.isValidState(state)
-  if type(state) ~= "table" then return false end
+  if type(state) ~= "table" or state.version ~= Rules.STATE_VERSION then return false end
   if type(state.order) ~= "table" or #state.order == 0 then return false end
-  if type(state.turn) ~= "number" or state.order[state.turn] == nil then return false end
-  if type(state.riders) ~= "table" or type(state.prizms) ~= "table"
-    or type(state.markers) ~= "table" then return false end
+  if type(state.roundOrder) ~= "table" or type(state.turn) ~= "number"
+    or state.roundOrder[state.turn] == nil then return false end
+  if type(state.round) ~= "number" or type(state.tieBreaker) ~= "number" then return false end
+  if type(state.riders) ~= "table" or type(state.prizms) ~= "table" then return false end
   for _, c in ipairs(state.order) do
     local r = state.riders[c]
     if type(r) ~= "table" or type(r.pose) ~= "table" or type(r.trail) ~= "table"
