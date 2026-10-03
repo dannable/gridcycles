@@ -1,4 +1,6 @@
 -- Rules tests. Use a fixed rollFn for determinism.
+-- Most tests race straight away; "blind starting gear" below turns the pick on itself.
+Config.blindStartGear = false
 local function fixed(v) return function() return v end end
 
 -- Sequence roller: returns the listed values in order, then repeats the last.
@@ -11,8 +13,11 @@ local function seq(...)
 end
 
 -- Deterministic state: Red at the origin heading +z, no Prizms unless given.
+-- No rider abilities (tests/test_riders.lua covers those).
 local function newState(prizms)
   local st = Rules.newState({ "Red", "Blue" }, fixed(3))
+  st.riders.Red.ability, st.riders.Blue.ability = nil, nil
+  st.pickingStart = false
   st.riders.Red.pose = { x = 0, z = -10, heading = 0 }
   st.riders.Blue.pose = { x = 10, z = 10, heading = 180 }
   st.prizms = prizms or {}
@@ -184,7 +189,7 @@ describe("Rules.resolveMove", function()
     assert_eq(#st.riders.Red.trail.tiles, 5)
   end)
 
-  it("crossing an unscored Prizm scores it: it takes your colour, stays put, and a new one is tossed", function()
+  it("crossing an unscored Prizm scores it: it takes your colour, slides to the tile front, and a new one is tossed", function()
     local st = newState({ { id = 7, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } })
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, function(n) return math.random(n) end)
     assert_eq(r.outcome, "placed")
@@ -193,18 +198,24 @@ describe("Rules.resolveMove", function()
     assert_eq(Rules.prizmCount(st, "Red"), 1)
     assert_eq(st.prizms[1].id, 7)
     assert_eq(st.prizms[1].owner, "Red")
-    assert_near(st.prizms[1].a.z, -9, 1e-9)
+    -- slid to the front of the tile (exit z = -8), across the line
+    local p = st.prizms[1]
+    assert_near(p.a.z, -8 - Config.prizm.slideBack, 1e-9)
+    assert_near(p.b.z, -8 - Config.prizm.slideBack, 1e-9)
+    assert_near((p.a.x + p.b.x) / 2, 0, 1e-9)
+    assert_near(math.abs(p.b.x - p.a.x), Config.prizm.length, 1e-9)
     assert_eq(#st.prizms, 2, "scored one stays, replacement added")
     assert_eq(#r.spawned, 1)
     assert_eq(st.prizms[2].id, 100)
     assert_eq(st.prizms[2].owner, nil)
   end)
 
-  it("a Prizm the tile only ends on is not scored (it is nudged clear instead)", function()
+  it("a Prizm the tile only ends on is not scored, and stays put for the next tile", function()
     local z = -10 + Config.tiles[1].straight
     local st = newState({ { id = 7, a = { x = -1, z = z }, b = { x = 1, z = z } } })
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
     assert_eq(#r.scored, 0)
+    assert_eq(#r.nudged, 0)
     assert_eq(st.prizms[1].owner, nil)
   end)
 
@@ -894,5 +905,254 @@ describe("respawn gear choice", function()
     assert_true(Rules.isValidState(st))
     st.pendingGear = "Purple"
     assert_false(Rules.isValidState(st))
+  end)
+end)
+
+describe("scoring across two turns", function()
+  -- Red's G1 straight runs from z = -10 to z = -8.
+  local function prizmAt(z, owner)
+    return { id = 1, owner = owner, a = { x = -1, z = z }, b = { x = 1, z = z } }
+  end
+  it("a tile ending on top of a Prizm doesn't score; the next tile finishes it", function()
+    for _, z in ipairs({ -8.1, -7.9 }) do
+      local st = newState({ prizmAt(z) })
+      local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+      assert_eq(#r.scored, 0, "stopped on top at z=" .. z)
+      assert_eq(#r.nudged, 0, "a Prizm you stop on is not nudged away")
+      assert_near(st.prizms[1].a.z, z, 1e-9)
+      r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+      assert_eq(#r.scored, 1, "finished at z=" .. z)
+    end
+  end)
+  it("a crossing finished last turn is not counted again (no re-steal)", function()
+    local st = newState({ prizmAt(-9) })
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(#r.scored, 1)
+    st.prizms[1].owner = "Blue"
+    r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(#r.stolen, 0)
+    assert_eq(st.prizms[1].owner, "Blue")
+  end)
+  it("after a crash there is no lead-in: a fresh line must cross on its own", function()
+    local st = newState({ prizmAt(-8.1) })
+    Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    st.riders.Red.trail = { segs = {}, tiles = {} }
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(#r.scored, 0)
+  end)
+end)
+
+describe("a Prizm you take slides to the front of the tile", function()
+  it("a stolen Prizm slides too, across the thief's line", function()
+    local st = newState({ { id = 1, owner = "Blue", a = { x = -9, z = -1 }, b = { x = -9, z = 1 } } })
+    st.riders.Red.pose = { x = -10, z = 0, heading = 90 }   -- heading +x, crossing x = -9
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(#r.stolen, 1)
+    local p = st.prizms[1]
+    assert_near((p.a.x + p.b.x) / 2, -8 - Config.prizm.slideBack, 1e-9)
+    assert_near(p.a.x, p.b.x, 1e-9, "perpendicular to the line")
+  end)
+  it("it sits on its owner's line, so it is locked against nudges", function()
+    local st = newState({ { id = 1, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } })
+    Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    local p = st.prizms[1]
+    assert_true(Geom.pathDistance(st.riders.Red.trail.segs, p) < 1e-9, "on the line")
+  end)
+  it("two Prizms taken by one tile don't land on each other", function()
+    local st = newState({ { id = 1, a = { x = -1, z = -9.5 }, b = { x = 1, z = -9.5 } },
+                          { id = 2, a = { x = -1, z = -8.7 }, b = { x = 1, z = -8.7 } } })
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(#r.scored, 2)
+    assert_true(Geom.segmentDistance(st.prizms[1], st.prizms[2]) > 0.2)
+  end)
+  it("your next tile does not take your slid Prizm back after it is stolen", function()
+    local st = newState({ { id = 1, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } })
+    Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    st.prizms[1].owner = "Blue"
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(#r.stolen, 0)
+  end)
+end)
+
+describe("launch wall", function()
+  it("each rider starts on a launch wall from the mat edge to their bike's nose", function()
+    local st = Rules.newState({ "Red", "Blue" }, function(n) return math.random(n) end)
+    for _, c in ipairs(st.order) do
+      local r = st.riders[c]
+      local bike = Geom.bikeSeg(r.pose)
+      assert_near(r.launch.a.x, bike.a.x, 1e-9); assert_near(r.launch.a.z, bike.a.z, 1e-9)
+      assert_near(r.launch.b.x, r.pose.x, 1e-9); assert_near(r.launch.b.z, r.pose.z, 1e-9)
+    end
+  end)
+  it("the owner's first tile leaves it without crashing", function()
+    local st = newState()
+    st.riders.Red.launch = Geom.bikeSeg(st.riders.Red.pose)
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "placed")
+  end)
+  it("stays after the bike leaves: crossing it later is a crash, costing its owner nothing", function()
+    local st = newState()
+    st.riders.Red.launch = { a = { x = 0, z = -12 }, b = { x = 0, z = -10 } }
+    st.riders.Red.pose = { x = 5, z = 5, heading = 0 }
+    Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    local redTiles = #st.riders.Red.trail.tiles
+    st.riders.Blue.pose = { x = -1, z = -11, heading = 90 }
+    local r = Rules.resolveMove(st, "Blue", { kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "crash")
+    assert_eq(r.crashReason, "launch")
+    assert_eq(r.crashOwner, "Red")
+    assert_eq(r.victim, nil)
+    assert_eq(#st.riders.Red.trail.tiles, redTiles)
+    assert_true(st.riders.Red.launch ~= nil, "a rival's crash leaves it standing")
+  end)
+  it("blocks its owner too once they've left it", function()
+    local st = newState()
+    st.riders.Red.launch = { a = { x = 0, z = -12 }, b = { x = 0, z = -10 } }
+    st.riders.Red.pose = { x = -1, z = -11, heading = 90 }
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(r.crashReason, "launch")
+    assert_eq(r.crashOwner, "Red")
+  end)
+  it("a crash relaunches the rider on a new wall, and the old one goes", function()
+    local st = newState()
+    local old = { a = { x = 0, z = -12 }, b = { x = 0, z = -10 } }
+    st.riders.Red.launch = old
+    st.riders.Red.pose = { x = 0, z = Config.mat.depth / 2 - 0.5, heading = 0 }
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "crash")
+    local l = st.riders.Red.launch
+    assert_true(l ~= old)
+    assert_near(l.b.x, st.riders.Red.pose.x, 1e-9); assert_near(l.b.z, st.riders.Red.pose.z, 1e-9)
+  end)
+  it("saves without launch walls are still valid", function()
+    local st = newState()
+    st.riders.Red.launch, st.riders.Blue.launch = nil, nil
+    assert_true(Rules.isValidState(st))
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "placed")
+  end)
+end)
+
+describe("blind starting gear", function()
+  local function blind(colors)
+    local was = Config.blindStartGear
+    Config.blindStartGear = true
+    local st = Rules.newState(colors, fixed(3))
+    Config.blindStartGear = was
+    return st
+  end
+  it("a new game waits for everyone's secret pick; nobody can move or pass", function()
+    local st = blind({ "Red", "Blue" })
+    assert_true(st.pickingStart)
+    assert_eq(st.riders.Red.gear, 1)
+    assert_false(Rules.advanceTurn(st))
+    local ok, why = Rules.validateTileDrop(st, "Red", 1, "straight", { x = 0, z = 0 })
+    assert_false(ok); assert_eq(why, "pick")
+  end)
+  it("picks are revealed together once all are in; different picks are kept", function()
+    local st = blind({ "Red", "Blue", "Green" })
+    local ok, reveal = Rules.chooseStartGear(st, "Red", 2)
+    assert_true(ok); assert_eq(reveal, nil, "not everyone has picked")
+    assert_eq(st.riders.Red.gear, 1, "hidden until the reveal")
+    assert_true(Rules.chooseStartGear(st, "Blue", 4))
+    ok, reveal = Rules.chooseStartGear(st, "Green", 5)
+    assert_true(ok)
+    assert_false(st.pickingStart)
+    assert_eq(st.riders.Red.gear, 2); assert_eq(st.riders.Blue.gear, 4); assert_eq(st.riders.Green.gear, 5)
+    assert_eq(reveal.Red.picked, 2); assert_false(reveal.Red.stalled)
+    assert_eq(st.roundOrder[1], "Green", "fastest goes first")
+    assert_eq(st.roundOrder[3], "Red")
+  end)
+  it("riders who picked the same gear stall to G1", function()
+    local st = blind({ "Red", "Blue", "Green" })
+    Rules.chooseStartGear(st, "Red", 3)
+    Rules.chooseStartGear(st, "Blue", 3)
+    local _, reveal = Rules.chooseStartGear(st, "Green", 2)
+    assert_eq(st.riders.Red.gear, 1); assert_eq(st.riders.Blue.gear, 1); assert_eq(st.riders.Green.gear, 2)
+    assert_true(reveal.Red.stalled); assert_true(reveal.Blue.stalled); assert_false(reveal.Green.stalled)
+    assert_eq(reveal.Blue.picked, 3)
+    assert_eq(st.roundOrder[1], "Green")
+  end)
+  it("a pick can be changed before the reveal, and is refused after or when out of range", function()
+    local st = blind({ "Red", "Blue" })
+    Rules.chooseStartGear(st, "Red", 5)
+    Rules.chooseStartGear(st, "Red", 4)
+    local ok, why = Rules.chooseStartGear(st, "Red", 9)
+    assert_false(ok); assert_eq(why, "range")
+    ok, why = Rules.chooseStartGear(st, "Purple", 2)
+    assert_false(ok); assert_eq(why, "who")
+    Rules.chooseStartGear(st, "Blue", 2)
+    assert_eq(st.riders.Red.gear, 4)
+    ok, why = Rules.chooseStartGear(st, "Red", 3)
+    assert_false(ok); assert_eq(why, "none")
+  end)
+  it("off: everyone starts at G1 with no picking", function()
+    local was = Config.blindStartGear
+    Config.blindStartGear = false
+    local st = Rules.newState({ "Red", "Blue" }, fixed(3))
+    Config.blindStartGear = was
+    assert_false(st.pickingStart)
+    assert_eq(st.riders.Red.gear, 1)
+  end)
+  it("a pick in progress survives a save; a broken one is invalid", function()
+    local st = blind({ "Red", "Blue" })
+    Rules.chooseStartGear(st, "Red", 3)
+    assert_true(Rules.isValidState(st))
+    st.startPicks = "oops"
+    assert_false(Rules.isValidState(st))
+  end)
+end)
+
+describe("table sizes", function()
+  local function withSize(name, fn)
+    Config.useTableSize(name)
+    local ok, err = pcall(fn)
+    Config.useTableSize("standard")
+    if not ok then error(err, 0) end
+  end
+  it("standard is the default 36x36 mat with five gears", function()
+    Config.useTableSize("standard")
+    assert_eq(Config.mat.width, 36); assert_eq(Config.gears.max, 5)
+    local st = Rules.newState({ "Red" }, fixed(3))
+    assert_eq(Rules.supplyLeft(st, "Red", 5, "straight"), Config.tileSupply[5].straight)
+  end)
+  it("small: a smaller mat and no gear 5", function()
+    withSize("small", function()
+      assert_true(Config.mat.width < 36)
+      assert_eq(Config.gears.max, 4)
+      local st = Rules.newState({ "Red", "Blue" }, fixed(3))
+      st.pickingStart = false
+      assert_eq(st.riders.Red.supply[5], nil, "no gear 5 pieces")
+      assert_eq(Rules.gearAfterShift(4, 1), 4, "can't shift into gear 5")
+      local ok, why = Rules.chooseGear({ pendingGear = "Red", riders = st.riders }, "Red", 5)
+      assert_false(ok); assert_eq(why, "range")
+      for _, c in ipairs(st.order) do
+        assert_true(Geom.inBounds({ Geom.bikeSeg(st.riders[c].pose) }, Config.mat), "launches on the small mat")
+      end
+    end)
+  end)
+  it("large: a bigger mat and one extra G5 straight each", function()
+    withSize("large", function()
+      assert_true(Config.mat.width > 36)
+      assert_eq(Config.gears.max, 5)
+      local st = Rules.newState({ "Red" }, fixed(3))
+      assert_eq(Rules.supplyLeft(st, "Red", 5, "straight"), Config.tileSupply[5].straight + 1)
+      assert_eq(Rules.supplyLeft(st, "Red", 4, "straight"), Config.tileSupply[4].straight)
+    end)
+  end)
+  it("switching back restores the standard values (presets are not changed)", function()
+    Config.useTableSize("large")
+    Config.mat.width = 999
+    Config.useTableSize("standard")
+    Config.useTableSize("large")
+    assert_true(Config.mat.width ~= 999)
+    Config.useTableSize("standard")
+    assert_eq(Config.mat.width, 36)
+    assert_eq(Config.supplyBonus, nil)
+  end)
+  it("an unknown size falls back to standard", function()
+    Config.useTableSize("huge")
+    assert_eq(Config.tableSize, "standard")
+    assert_eq(Config.mat.width, 36)
   end)
 end)

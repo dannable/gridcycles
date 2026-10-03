@@ -5,6 +5,7 @@
 #include config
 #include geom
 #include rules
+#include riders/riders
 #include tts/spawn
 #include tts/ui
 #include tts/events

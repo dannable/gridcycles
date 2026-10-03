@@ -9,7 +9,7 @@ Config = {
   prizmRingRadius = 6,          -- the starting neutral Prizms sit evenly spaced on a ring this wide
   maxPlayers = 4,
 
-  mat = { width = 36, depth = 36 },        -- play area, centred on origin
+  mat = { width = 36, depth = 36 },        -- play area, centred on origin (set by tableSize)
 
   gears = { min = 1, max = 5, maxShift = 1 },
 
@@ -51,7 +51,12 @@ Config = {
   -- Contact within passRadius of a Prizm never crashes (it is a gap in any wall). A
   -- tile that comes within touchDist of an unscored, unlocked Prizm without scoring
   -- nudges it away until it is nudgeClear from every wall.
-  prizm = { length = 1.5, endSlack = 0.175, passRadius = 0.4, touchDist = 0.33, nudgeClear = 0.55 },
+  -- A line that ends within onAxis of the axis (on top of the Prizm, half its width)
+  -- has not crossed yet; its next tile can finish the crossing.
+  -- A Prizm you take slides to the front of the tile that took it: across the line,
+  -- slideBack behind its end (more than onAxis, so your next tile can't take it again).
+  prizm = { length = 1.5, endSlack = 0.175, passRadius = 0.4, touchDist = 0.33, nudgeClear = 0.55,
+            onAxis = 0.15, slideBack = 0.3 },
 
   -- The bike is part of its owner's trail: a segment this long ending at the trail
   -- end (nose on the exit of the last tile, tail back over it). Other riders crash
@@ -113,4 +118,31 @@ Config = {
   placementMode = "commit", -- "commit" | "hand"
   snapRadius = 3.0,         -- hand mode: max distance from a tile's landing spot
   abilitiesEnabled = true,
+  blindStartGear = true,    -- riders secretly pick starting gears; matching picks stall to G1
+
+  -- Table size (lobby). Each preset sets the mat, the top gear (pieces above it don't
+  -- exist) and any bonus pieces every rider gets. Applied with Config.useTableSize.
+  tableSize = "standard",
+  tableSizes = {
+    small    = { mat = { width = 28, depth = 28 }, maxGear = 4 },
+    standard = { mat = { width = 36, depth = 36 }, maxGear = 5 },
+    large    = { mat = { width = 44, depth = 44 }, maxGear = 5, bonus = { [5] = { straight = 1 } } },
+  },
+
+  -- Rider abilities (src/riders/riders.lua).
+  abilities = {
+    echoMaxShift = 2,       -- Echo may shift this many gears
+    gridlockReach = 1.0,    -- Gridlock removes a rival tile this close to a Prizm it takes
+  },
 }
+
+-- Switch to a table-size preset (unknown names fall back to "standard"). Copies the
+-- preset's values in, so later changes to Config.mat never touch the preset.
+function Config.useTableSize(name)
+  local preset = Config.tableSizes[name]
+  if preset == nil then name, preset = "standard", Config.tableSizes.standard end
+  Config.tableSize = name
+  Config.mat = { width = preset.mat.width, depth = preset.mat.depth }
+  Config.gears.max = preset.maxGear
+  Config.supplyBonus = preset.bonus   -- read-only: { [gear] = { shape = n } } or nil
+end

@@ -176,37 +176,66 @@ end
 -- Touching or ending on the axis does not count. `slack` (default 0) extends the
 -- axis at both ends for the "crossing is on the Prizm" test, so a wall that overlaps
 -- an end of the Prizm counts (see Config.prizm.endSlack).
-function Geom.pathCrossesPrizm(newSegs, prizmSeg, slack)
+-- `band` (default 0): points within this distance of the axis are "on top of" the
+-- Prizm, on neither side, so a line that stops there has not crossed yet.
+-- `leadIn` (optional): the path laid just before newSegs (ignored unless it ends where
+-- newSegs starts).
+-- A crossing may start on the lead-in, but must finish on newSegs: this is how a line
+-- that stopped on top of a Prizm finishes crossing it with the next tile, without a
+-- crossing that already happened counting twice.
+function Geom.pathCrossesPrizm(newSegs, prizmSeg, slack, band, leadIn)
   local pa, pb = prizmSeg.a, prizmSeg.b
-  if slack and slack > 0 then
-    local dx, dz = pb.x - pa.x, pb.z - pa.z
-    local len = math.sqrt(dx * dx + dz * dz)
-    local ux, uz = dx / len * slack, dz / len * slack
-    pa = { x = pa.x - ux, z = pa.z - uz }
-    pb = { x = pb.x + ux, z = pb.z + uz }
+  local dx, dz = pb.x - pa.x, pb.z - pa.z
+  local len = math.sqrt(dx * dx + dz * dz)
+  slack, band = slack or 0, band or 0
+
+  -- polyline vertices: lead-in first; `joint` is where newSegs starts
+  local pts = {}
+  if leadIn and #leadIn > 0 and samePoint(leadIn[#leadIn].b, newSegs[1].a) then
+    pts[1] = leadIn[1].a
+    for _, s in ipairs(leadIn) do pts[#pts + 1] = s.b end
+  else
+    pts[1] = newSegs[1].a
   end
-  -- polyline vertices
-  local pts = { newSegs[1].a }
+  local joint = #pts
   for _, s in ipairs(newSegs) do pts[#pts + 1] = s.b end
+
+  local function side(p)
+    local o = orient(pa, pb, p)
+    if band > 0 then
+      o = o / len
+      if o > band then return 1 elseif o < -band then return -1 end
+      return 0
+    end
+    return sign(o)
+  end
+
+  -- where the polyline between pts[i0] and pts[i1] meets the axis line
+  local function crossing(i0, i1)
+    for j = i0, i1 - 1 do
+      local p0, p1 = pts[j], pts[j + 1]
+      local d0, d1 = orient(pa, pb, p0), orient(pa, pb, p1)
+      if d0 == 0 then return p0 end
+      if (d0 < 0) ~= (d1 < 0) or d1 == 0 then
+        local t = d0 / (d0 - d1)
+        return { x = p0.x + (p1.x - p0.x) * t, z = p0.z + (p1.z - p0.z) * t }
+      end
+    end
+    return pts[i1]
+  end
 
   local lastIdx, lastSide = nil, 0
   for i, p in ipairs(pts) do
-    local side = sign(orient(pa, pb, p))
-    if side ~= 0 then
-      if lastSide ~= 0 and side ~= lastSide then
-        -- crossing happened between pts[lastIdx] and pts[i]; locate it
-        local hit
-        if i - lastIdx > 1 then
-          hit = pts[lastIdx + 1]            -- first vertex lying on the axis
-        else
-          local p0, p1 = pts[lastIdx], p
-          local d0, d1 = orient(pa, pb, p0), orient(pa, pb, p1)
-          local t = d0 / (d0 - d1)
-          hit = { x = p0.x + (p1.x - p0.x) * t, z = p0.z + (p1.z - p0.z) * t }
-        end
-        if onSegment(pa, pb, hit) then return true end
+    local sd = side(p)
+    if sd ~= 0 then
+      if lastSide ~= 0 and sd ~= lastSide and i > joint then
+        local hit = crossing(lastIdx, i)
+        -- on the Prizm: the crossing projects within the (slack-extended) axis
+        local t = ((hit.x - pa.x) * dx + (hit.z - pa.z) * dz) / (len * len)
+        local ext = slack / len
+        if t >= -ext - eps() and t <= 1 + ext + eps() then return true end
       end
-      lastIdx, lastSide = i, side
+      lastIdx, lastSide = i, sd
     end
   end
   return false

@@ -6,12 +6,16 @@
 -- Config.seatOrder). A move may only be committed by the player whose turn it is.
 
 Events = {
-  pendingShift = 0,     -- -1 / 0 / +1 for the current rider; reset every turn
+  pendingShift = 0,     -- -1 / 0 / +1 (Echo: up to +-2) for the current rider; reset every turn
+  pendingBoost = false,     -- Volt Vixen armed for the next move
+  pendingOverclock = false, -- Overclock armed for the next move
   settings = {          -- lobby settings; copied into State.settings when a game starts
     maxPlayers = Config.maxPlayers,
     prizmsToWin = Config.prizmsToWin,
     abilities = Config.abilitiesEnabled,
     mode = Config.placementMode,
+    blindStart = Config.blindStartGear,
+    tableSize = Config.tableSize,
   },
 }
 
@@ -86,12 +90,23 @@ local function applySettings(s)
   Config.prizmsToWin = s.prizmsToWin
   Config.abilitiesEnabled = s.abilities
   Config.placementMode = s.mode
+  Config.blindStartGear = s.blindStart == true   -- saves from before this setting started at G1
+  Config.useTableSize(s.tableSize or "standard")
+end
+
+local TABLE_SIZES = { "small", "standard", "large" }
+
+-- Forget the current rider's half-made choices (shift, armed abilities).
+local function resetPending()
+  Events.pendingShift = 0
+  Events.pendingBoost = false
+  Events.pendingOverclock = false
 end
 
 -- Back to the lobby: no game, empty mat, settings panel up.
 function Events.toLobby()
   State = nil
-  Events.pendingShift = 0
+  resetPending()
   UI_.clearLog()
   Spawn.clearAll()
   Spawn.mat()
@@ -100,7 +115,7 @@ end
 
 -- colors: optional override (tests); defaults to the seated players.
 function Events.newGame(colors)
-  Events.pendingShift = 0
+  resetPending()
   applySettings(Events.settings)
   colors = colors or seatedColors()
   if #colors == 0 then colors = { "Red" } end   -- nobody seated: solo Red sandbox
@@ -108,13 +123,21 @@ function Events.newGame(colors)
   State.settings = {
     maxPlayers = Events.settings.maxPlayers, prizmsToWin = Events.settings.prizmsToWin,
     abilities = Events.settings.abilities, mode = Events.settings.mode,
+    blindStart = Events.settings.blindStart, tableSize = Events.settings.tableSize,
   }
   UI_.clearLog()
   Spawn.rebuild(State)
   syncTurns()
   UI_.rebuild(State.order)
+  local start = State.pickingStart
+    and "Everyone: secretly choose a starting gear. Riders who pick the same gear stall to G1."
+    or (State.roundOrder[1] .. " goes first.")
   say("New game: " .. table.concat(colors, ", ") .. ". First to hold " .. Config.prizmsToWin
-    .. " Prizms of their colour wins. " .. State.roundOrder[1] .. " goes first.", rgb(State.roundOrder[1]))
+    .. " Prizms of their colour wins. " .. start, rgb(State.roundOrder[1]))
+  for _, c in ipairs(State.order) do
+    local id = State.riders[c].ability
+    if id then say(c .. " rides as " .. Riders.name(id) .. ": " .. Riders.text(id), rgb(c)) end
+  end
 end
 
 -- Lobby button presses. Settings are host-only.
@@ -129,6 +152,11 @@ function Events.lobbyClick(player, action)
   elseif action == "prizms_dec" then s.prizmsToWin = math.max(1, s.prizmsToWin - 1)
   elseif action == "prizms_inc" then s.prizmsToWin = math.min(6, s.prizmsToWin + 1)
   elseif action == "abilities" then s.abilities = not s.abilities
+  elseif action == "blindstart" then s.blindStart = not s.blindStart
+  elseif action == "table" then
+    local i = 1
+    for k, name in ipairs(TABLE_SIZES) do if name == s.tableSize then i = k end end
+    s.tableSize = TABLE_SIZES[i % #TABLE_SIZES + 1]
   elseif action == "mode" then
     s.mode = (s.mode == "hand") and "commit" or "hand"
   elseif action == "start" then
@@ -143,7 +171,7 @@ end
 
 -- After load: rebuild visuals from saved state.
 function Events.restore()
-  Events.pendingShift = 0
+  resetPending()
   if type(State.settings) == "table" then
     Events.settings = State.settings
   end
@@ -163,6 +191,10 @@ local function mayAct(playerColor)
     printToColor("The game is over. The host can go back to the lobby.", playerColor, { 1, 1, 1 })
     return false
   end
+  if State.pickingStart then
+    printToColor("Riders are still choosing their starting gears.", playerColor, { 1, 1, 1 })
+    return false
+  end
   if State.pendingGear then
     printToColor(State.pendingGear .. " is choosing a respawn gear.", playerColor, rgb(State.pendingGear))
     return false
@@ -177,7 +209,23 @@ end
 
 function Events.setShift(playerColor, n)
   if not mayAct(playerColor) then return end
+  local m = Riders.maxShift(State.riders[playerColor])
+  if math.abs(n) > m then return end
   Events.pendingShift = n
+  UI_.refresh()
+end
+
+-- Arm or disarm an ability for the next move: "boost" (Volt Vixen) or "overclock".
+function Events.toggleAbility(playerColor, which)
+  if not mayAct(playerColor) then return end
+  local rider = State.riders[playerColor]
+  if which == "boost" and Riders.canBoost(rider) then
+    Events.pendingBoost = not Events.pendingBoost
+  elseif which == "overclock" and Riders.canOverclock(rider) and not State.bonusMove then
+    Events.pendingOverclock = not Events.pendingOverclock
+  else
+    return
+  end
   UI_.refresh()
 end
 
@@ -186,6 +234,8 @@ local function describe(color, move, r)
   if r.roll then
     parts[#parts + 1] = (r.roll == Config.turnCheck.die) and "rolled the SPIN-OUT face" or ("rolled " .. r.roll)
   end
+  if r.overclock then parts[#parts + 1] = "OVERCLOCK at G1" end
+  if r.boosted then parts[#parts + 1] = "VOLT: failed check, curved anyway" end
   if r.spunOut then
     parts[#parts + 1] = "SPIN-OUT, drops to G1"
   elseif r.wentStraight then
@@ -198,6 +248,7 @@ local function describe(color, move, r)
   if r.outcome == "crash" then
     local why = r.crashReason
     if r.crashReason == "bike" then why = "hit " .. r.crashOwner .. "'s bike"
+    elseif r.crashReason == "launch" then why = "hit " .. r.crashOwner .. "'s launch wall"
     elseif r.crashReason == "supply" then why = "no tile available" end
     parts[#parts + 1] = "CRASH (" .. why .. "), respawning"
   end
@@ -207,8 +258,14 @@ local function describe(color, move, r)
   for _, st in ipairs(r.stolen or {}) do
     parts[#parts + 1] = "STOLE a Prizm from " .. st.from
   end
+  for _, c in ipairs(r.recharged or {}) do
+    parts[#parts + 1] = c .. "'s " .. Riders.name(State.riders[c].ability) .. " recharges"
+  end
   if r.nudged and #r.nudged > 0 then
     parts[#parts + 1] = "nudged " .. #r.nudged .. " Prizm(s) clear"
+  end
+  for _, h in ipairs(r.gridlock or {}) do
+    parts[#parts + 1] = "GRIDLOCK removes a " .. h.color .. " tile"
   end
   if r.victim and #r.victim.removedTiles > 0 then
     parts[#parts + 1] = r.victim.color .. " loses " .. #r.victim.removedTiles .. " tile(s)"
@@ -233,10 +290,12 @@ local function apply(color, r)
   end
   if r.outcome == "crash" then
     Spawn.clearTrail(color)
+    Spawn.launch(color, State.riders[color].launch)
     Spawn.rider(color, r.respawn)
     return
   end
   for _, id in ipairs(r.removedTiles or {}) do Spawn.removeTile(color, id) end
+  for _, h in ipairs(r.gridlock or {}) do Spawn.removeTile(h.color, h.tileId) end
   Spawn.tile(color, r.segs, r.tileGear, r.shape, State.riders[color].nextTileId - 1)
   Spawn.rider(color, r.exitPose)
   for _, id in ipairs(r.scored) do refreshPrizm(id) end
@@ -269,8 +328,9 @@ end
 function Events.commitMove(playerColor, kind, curve)
   if not mayAct(playerColor) then return end
   local color = playerColor
-  local move = { shift = Events.pendingShift, kind = kind, curve = curve or "soft" }
-  Events.pendingShift = 0
+  local move = { shift = Events.pendingShift, kind = kind, curve = curve or "soft",
+                 boost = Events.pendingBoost, overclock = Events.pendingOverclock }
+  resetPending()
   local r = Rules.resolveMove(State, color, move, rollFn)
   apply(color, r)
   say(describe(color, move, r), rgb(color))
@@ -284,16 +344,54 @@ function Events.commitMove(playerColor, kind, curve)
     say(color .. ", choose your respawn gear.", rgb(color))
     syncTurns()
     UI_.refresh()
+  elseif r.bonusMove then
+    say(color .. " overclocks: move again at G1.", rgb(color))
+    UI_.refresh()
   else
     endTurn(color)
   end
 end
 
--- A crashed rider picks their respawn gear (the host may pick for them, so an absent
--- player can't stall the table). `player` is the clicking TTS player: { color, host }.
-function Events.chooseGear(player, gear)
-  if State == nil or not State.pendingGear then return end
-  local color = State.pendingGear
+-- Blind start: `color` secretly picks a starting gear. The value is never shown until
+-- everyone has picked; then all picks are revealed and the first round begins.
+local function chooseStartGear(color, gear)
+  local ok, reveal = Rules.chooseStartGear(State, color, gear)
+  if not ok then return end
+  if reveal == nil then
+    say(color .. " has chosen a starting gear.", rgb(color))
+    UI_.refresh()
+    return
+  end
+  for _, c in ipairs(State.order) do
+    local v = reveal[c]
+    if v.stalled then
+      say(c .. " picked G" .. v.picked .. ", same as someone else: stalls to G" .. State.riders[c].gear .. ".", rgb(c))
+    else
+      say(c .. " starts in G" .. v.picked .. ".", rgb(c))
+    end
+  end
+  announceRound()
+  syncTurns()
+  UI_.refresh()
+end
+
+-- The gear picker: a crashed rider's respawn gear, or a secret starting gear. The host
+-- may pick for anyone, so an absent player can't stall the table. `player` is the
+-- clicking TTS player: { color, host }; `color` is the rider the button belongs to.
+function Events.chooseGear(player, gear, color)
+  if State == nil then return end
+  if State.pickingStart then
+    color = color or player.color
+    if player.color ~= color and not player.host then
+      printToColor("Only " .. color .. " (or the host) can choose that.", player.color, { 1, 1, 1 })
+      return
+    end
+    chooseStartGear(color, gear)
+    return
+  end
+  if not State.pendingGear then return end
+  if color ~= nil and color ~= State.pendingGear then return end
+  color = State.pendingGear
   if player.color ~= color and not player.host then
     printToColor("Only " .. color .. " (or the host) can choose that.", player.color, { 1, 1, 1 })
     return
@@ -308,9 +406,10 @@ end
 -- if the drop was legal, the move is committed through the normal pipeline.
 local DROP_MESSAGES = {
   turn = "It isn't your turn.",
-  pick = "A crashed rider has to choose a respawn gear first.",
+  pick = "Wait until the gear picks are done.",
   over = "The game is over.",
   gear = "That tile is more than %d gear(s) from your current gear (G%d).",
+  overclock = "An Overclock move needs a G1 tile.",
   far  = "Drop the tile closer to where your trail ends.",
 }
 
@@ -325,12 +424,16 @@ function Events.handleDrop(playerColor, obj)
     return
   end
   local p = obj.getPosition()
-  local ok, v = Rules.validateTileDrop(State, owner, gear, kind, { x = p.x, z = p.z }, shape)
+  local ok, v = Rules.validateTileDrop(State, owner, gear, kind, { x = p.x, z = p.z }, shape,
+    Events.pendingOverclock)
   Spawn.returnTile(obj)
   if not ok then
     local msg = DROP_MESSAGES[v]
-    if v == "gear" then
-      msg = string.format(msg, Config.gears.maxShift, State.riders[owner].gear)
+    local rider = State.riders[owner]
+    if v == "gear" and (State.bonusMove == owner or Events.pendingOverclock) then
+      msg = DROP_MESSAGES.overclock
+    elseif v == "gear" then
+      msg = string.format(msg, Riders.maxShift(rider), rider.gear)
     end
     printToColor(msg, playerColor, { 1, 1, 1 })
     return
