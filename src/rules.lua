@@ -59,7 +59,8 @@
 --              victim = { color, removedTiles = { id... } } (crash into someone else's trail),
 --              boosted (Volt Vixen's charge saved a failed check), overclock (this move was
 --              an Overclock, first or second), bonusMove (the rider moves again now),
---              gridlock = { { color, tileId }... } (rival tiles Gridlock removed) }
+--              gridlock = { { color, tileId }... } (rival tiles Gridlock removed),
+--              recharged = { color... } (riders whose ability came back: a Prizm was stolen) }
 
 Rules = {}
 
@@ -360,6 +361,7 @@ function Rules.crash(state, color, reason, owner, rollFn)
   return {
     outcome = "crash", crashReason = reason, crashOwner = owner,
     gear = rider.gear, captured = {}, spawned = {}, scored = {}, stolen = {}, nudged = {}, gridlock = {},
+    recharged = {},
     respawn = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading },
   }
 end
@@ -505,7 +507,7 @@ function Rules.resolveMove(state, color, move, rollFn)
     removedTiles = removedTiles, roll = roll, spunOut = spunOut, wentStraight = wentStraight,
     boosted = boosted, overclock = overclock, bonusMove = false,
     kind = kind, segs = segs, exitPose = exitPose,
-    scored = {}, stolen = {}, nudged = {}, spawned = {}, gridlock = {},
+    scored = {}, stolen = {}, nudged = {}, spawned = {}, gridlock = {}, recharged = {},
   }
 
   -- 4. crash checks
@@ -560,6 +562,9 @@ function Rules.resolveMove(state, color, move, rollFn)
         result.scored[#result.scored + 1] = p.id
       else
         result.stolen[#result.stolen + 1] = { id = p.id, from = p.owner }
+        if Riders.onStolenFrom(state.riders[p.owner]) then
+          result.recharged[#result.recharged + 1] = p.owner
+        end
       end
       p.owner = color
       took[p.id] = true

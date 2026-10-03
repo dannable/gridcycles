@@ -810,6 +810,20 @@ describe("Rider abilities (stubbed)", function()
     assert_true(said)
   end)
 
+  it("a stolen Prizm recharges its old owner's spent ability, in the log and on the panel", function()
+    game("echo", "vixen")
+    State.riders.Blue.charged = false
+    State.prizms = { { id = 1, owner = "Blue", a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } }
+    Spawn.prizm(State.prizms[1])
+    broadcasts = {}
+    Events.commitMove("Red", "straight")
+    assert_true(State.riders.Blue.charged)
+    local said = false
+    for _, m in ipairs(broadcasts) do if m:find("Blue's Volt Vixen recharges", 1, true) then said = true end end
+    assert_true(said)
+    assert_true(uiText.gcAbility_Blue:find("(ready)", 1, true) ~= nil, uiText.gcAbility_Blue)
+  end)
+
   local function tileObj(color, gear, label, c)
     local o = makeObj({ position = { c.x, 2, c.z } })
     o.setName(color .. " G" .. gear .. " " .. label)

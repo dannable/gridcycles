@@ -250,6 +250,9 @@ local function describe(color, move, r)
   for _, st in ipairs(r.stolen or {}) do
     parts[#parts + 1] = "STOLE a Prizm from " .. st.from
   end
+  for _, c in ipairs(r.recharged or {}) do
+    parts[#parts + 1] = c .. "'s " .. Riders.name(State.riders[c].ability) .. " recharges"
+  end
   if r.nudged and #r.nudged > 0 then
     parts[#parts + 1] = "nudged " .. #r.nudged .. " Prizm(s) clear"
   end

@@ -14,6 +14,9 @@
 --   echo       Echo. May shift up to Config.abilities.echoMaxShift gears.
 --   overclock  Overclock. Once per respawn (the launch counts): drop straight to G1
 --              and take two moves in a row, both at G1.
+--
+-- Power Prizms: when someone steals one of your Prizms, a spent Volt Vixen or Overclock
+-- charge comes back.
 
 Riders = {
   order = { "vixen", "gridlock", "echo", "overclock" },
@@ -72,6 +75,16 @@ end
 -- A crash gives a fresh respawn: Overclock recharges. (Volt Vixen is once per game.)
 function Riders.onRespawn(rider)
   if rider.ability == "overclock" then rider.charged = true end
+end
+
+-- Power Prizms: having a Prizm stolen recharges a spent once-per ability (Volt Vixen,
+-- Overclock). Returns true if it recharged.
+function Riders.onStolenFrom(rider)
+  if (rider.ability == "vixen" or rider.ability == "overclock") and not rider.charged then
+    rider.charged = true
+    return true
+  end
+  return false
 end
 
 function Riders.isValid(rider)
