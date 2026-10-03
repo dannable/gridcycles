@@ -118,6 +118,7 @@ Config = {
   placementMode = "commit", -- "commit" | "hand"
   snapRadius = 3.0,         -- hand mode: max distance from a tile's landing spot
   abilitiesEnabled = true,
+  blindStartGear = true,    -- riders secretly pick starting gears; matching picks stall to G1
 
   -- Rider abilities (src/riders/riders.lua).
   abilities = {

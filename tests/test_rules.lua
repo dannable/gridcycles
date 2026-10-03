@@ -1,4 +1,6 @@
 -- Rules tests. Use a fixed rollFn for determinism.
+-- Most tests race straight away; "blind starting gear" below turns the pick on itself.
+Config.blindStartGear = false
 local function fixed(v) return function() return v end end
 
 -- Sequence roller: returns the listed values in order, then repeats the last.
@@ -15,6 +17,7 @@ end
 local function newState(prizms)
   local st = Rules.newState({ "Red", "Blue" }, fixed(3))
   st.riders.Red.ability, st.riders.Blue.ability = nil, nil
+  st.pickingStart = false
   st.riders.Red.pose = { x = 0, z = -10, heading = 0 }
   st.riders.Blue.pose = { x = 10, z = 10, heading = 180 }
   st.prizms = prizms or {}
@@ -1027,5 +1030,75 @@ describe("launch wall", function()
     assert_true(Rules.isValidState(st))
     local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
     assert_eq(r.outcome, "placed")
+  end)
+end)
+
+describe("blind starting gear", function()
+  local function blind(colors)
+    local was = Config.blindStartGear
+    Config.blindStartGear = true
+    local st = Rules.newState(colors, fixed(3))
+    Config.blindStartGear = was
+    return st
+  end
+  it("a new game waits for everyone's secret pick; nobody can move or pass", function()
+    local st = blind({ "Red", "Blue" })
+    assert_true(st.pickingStart)
+    assert_eq(st.riders.Red.gear, 1)
+    assert_false(Rules.advanceTurn(st))
+    local ok, why = Rules.validateTileDrop(st, "Red", 1, "straight", { x = 0, z = 0 })
+    assert_false(ok); assert_eq(why, "pick")
+  end)
+  it("picks are revealed together once all are in; different picks are kept", function()
+    local st = blind({ "Red", "Blue", "Green" })
+    local ok, reveal = Rules.chooseStartGear(st, "Red", 2)
+    assert_true(ok); assert_eq(reveal, nil, "not everyone has picked")
+    assert_eq(st.riders.Red.gear, 1, "hidden until the reveal")
+    assert_true(Rules.chooseStartGear(st, "Blue", 4))
+    ok, reveal = Rules.chooseStartGear(st, "Green", 5)
+    assert_true(ok)
+    assert_false(st.pickingStart)
+    assert_eq(st.riders.Red.gear, 2); assert_eq(st.riders.Blue.gear, 4); assert_eq(st.riders.Green.gear, 5)
+    assert_eq(reveal.Red.picked, 2); assert_false(reveal.Red.stalled)
+    assert_eq(st.roundOrder[1], "Green", "fastest goes first")
+    assert_eq(st.roundOrder[3], "Red")
+  end)
+  it("riders who picked the same gear stall to G1", function()
+    local st = blind({ "Red", "Blue", "Green" })
+    Rules.chooseStartGear(st, "Red", 3)
+    Rules.chooseStartGear(st, "Blue", 3)
+    local _, reveal = Rules.chooseStartGear(st, "Green", 2)
+    assert_eq(st.riders.Red.gear, 1); assert_eq(st.riders.Blue.gear, 1); assert_eq(st.riders.Green.gear, 2)
+    assert_true(reveal.Red.stalled); assert_true(reveal.Blue.stalled); assert_false(reveal.Green.stalled)
+    assert_eq(reveal.Blue.picked, 3)
+    assert_eq(st.roundOrder[1], "Green")
+  end)
+  it("a pick can be changed before the reveal, and is refused after or when out of range", function()
+    local st = blind({ "Red", "Blue" })
+    Rules.chooseStartGear(st, "Red", 5)
+    Rules.chooseStartGear(st, "Red", 4)
+    local ok, why = Rules.chooseStartGear(st, "Red", 9)
+    assert_false(ok); assert_eq(why, "range")
+    ok, why = Rules.chooseStartGear(st, "Purple", 2)
+    assert_false(ok); assert_eq(why, "who")
+    Rules.chooseStartGear(st, "Blue", 2)
+    assert_eq(st.riders.Red.gear, 4)
+    ok, why = Rules.chooseStartGear(st, "Red", 3)
+    assert_false(ok); assert_eq(why, "none")
+  end)
+  it("off: everyone starts at G1 with no picking", function()
+    local was = Config.blindStartGear
+    Config.blindStartGear = false
+    local st = Rules.newState({ "Red", "Blue" }, fixed(3))
+    Config.blindStartGear = was
+    assert_false(st.pickingStart)
+    assert_eq(st.riders.Red.gear, 1)
+  end)
+  it("a pick in progress survives a save; a broken one is invalid", function()
+    local st = blind({ "Red", "Blue" })
+    Rules.chooseStartGear(st, "Red", 3)
+    assert_true(Rules.isValidState(st))
+    st.startPicks = "oops"
+    assert_false(Rules.isValidState(st))
   end)
 end)

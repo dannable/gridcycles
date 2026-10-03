@@ -49,7 +49,7 @@ end
 
 local function lobbyXml()
   return [[
-<Panel id="gcLobby" active="true" width="440" height="360" rectAlignment="MiddleCenter"
+<Panel id="gcLobby" active="true" width="440" height="404" rectAlignment="MiddleCenter"
        color="#0A0618F2" padding="16 16 16 16">
   <VerticalLayout spacing="10">
     <Text fontSize="30" color="#05D9E8" alignment="MiddleCenter" fontStyle="Bold">GRIDCYCLES</Text>
@@ -69,6 +69,10 @@ local function lobbyXml()
     <HorizontalLayout spacing="8">
       <Text fontSize="18" color="#FFFFFF" alignment="MiddleLeft">Rider abilities</Text>
       <Button id="gcl_abilities" onClick="gcClick" color="#2A1B5C" textColor="#39FF14" preferredWidth="120">ON</Button>
+    </HorizontalLayout>
+    <HorizontalLayout spacing="8">
+      <Text fontSize="18" color="#FFFFFF" alignment="MiddleLeft">Starting gear</Text>
+      <Button id="gcl_blindstart" onClick="gcClick" color="#2A1B5C" textColor="#39FF14" preferredWidth="120">Blind pick</Button>
     </HorizontalLayout>
     <HorizontalLayout spacing="8">
       <Text fontSize="18" color="#FFFFFF" alignment="MiddleLeft">Placement</Text>
@@ -141,7 +145,8 @@ local function riderXml(color)
     b("softright", "Soft R", h, "#000000"), b("hardright", "Hard R", h, "#000000"))
 end
 
--- Shown (to that rider and the host) after a crash: pick the gear to respawn in.
+-- Shown (to that rider and the host) after a crash: pick the gear to respawn in. Also
+-- used at the start of a blind-start game to pick a starting gear in secret.
 local function pickXml(color)
   local h = hex(color)
   local buttons = {}
@@ -152,10 +157,10 @@ local function pickXml(color)
 <Panel id="gcPick_%s" active="false" visibility="%s|Host" width="460" height="130" rectAlignment="MiddleCenter"
        offsetXY="0 60" color="#0A0618F2" padding="12 12 12 12">
   <VerticalLayout spacing="8">
-    <Text fontSize="20" color="%s" alignment="MiddleCenter" fontStyle="Bold" preferredHeight="34">%s crashed! Choose your respawn gear</Text>
+    <Text id="gcPickTitle_%s" fontSize="20" color="%s" alignment="MiddleCenter" fontStyle="Bold" preferredHeight="34">%s crashed! Choose your respawn gear</Text>
     <HorizontalLayout spacing="8" preferredHeight="48">%s</HorizontalLayout>
   </VerticalLayout>
-</Panel>]], color, color, h, color, table.concat(buttons))
+</Panel>]], color, color, color, h, color, table.concat(buttons))
 end
 
 -- Whole-UI XML. colors = riders in the current game (empty in the lobby).
@@ -221,6 +226,7 @@ function UI_.refresh()
   UI.setValue("gcl_players_val", tostring(s.maxPlayers))
   UI.setValue("gcl_prizms_val", tostring(s.prizmsToWin))
   UI.setValue("gcl_abilities", s.abilities and "ON" or "OFF")
+  UI.setValue("gcl_blindstart", s.blindStart and "Blind pick" or "All G1")
   UI.setValue("gcl_mode", s.mode == "hand" and "Hand" or "Commit")
   UI.setValue("gcl_seats", "Sit in " .. table.concat(Config.seatOrder, ", ")
     .. ", then press start. First " .. s.maxPlayers .. " seated colours race.")
@@ -234,6 +240,8 @@ function UI_.refresh()
   local hand = Config.placementMode == "hand"
   if State.winner then
     UI.setValue("gcStatus", State.winner .. " WINS!")
+  elseif State.pickingStart then
+    UI.setValue("gcStatus", "Choosing starting gears (secret)")
   elseif State.pendingGear then
     UI.setValue("gcStatus", State.pendingGear .. " is choosing a gear")
   else
@@ -255,9 +263,12 @@ function UI_.refresh()
 
   for _, c in ipairs(State.order) do
     local r = State.riders[c]
-    local mine = (c == cur) and not State.winner and not State.pendingGear
+    local mine = (c == cur) and not State.winner and not State.pendingGear and not State.pickingStart
+    local picking = State.pickingStart and State.startPicks[c] == nil
     setActive("gcPanel_" .. c, true)
-    setActive("gcPick_" .. c, State.pendingGear == c)
+    setActive("gcPick_" .. c, State.pendingGear == c or picking)
+    UI.setValue("gcPickTitle_" .. c, State.pickingStart and (c .. ": choose your starting gear (secret)")
+      or (c .. " crashed! Choose your respawn gear"))
     local shift = mine and Events.pendingShift or 0
     local overclocking = mine and (State.bonusMove == c or Events.pendingOverclock)
     local maxShift = Riders.maxShift(r)
@@ -265,6 +276,9 @@ function UI_.refresh()
     UI.setValue("gcGear_" .. c, string.format("GEAR %d  [%s]", r.gear, bar(r.gear)))
     if State.winner then
       UI.setValue("gcOdds_" .. c, "Game over")
+    elseif State.pickingStart then
+      UI.setValue("gcOdds_" .. c, picking and "Choose your starting gear in secret. Matching picks stall to G1"
+        or "Picked. Waiting for the others...")
     elseif State.pendingGear == c then
       UI.setValue("gcOdds_" .. c, "You crashed! Choose your respawn gear")
     elseif State.pendingGear then
@@ -351,7 +365,7 @@ function UI_.handle(player, id)
   if not color then return end
   local gear = action:match("^gear(%d)$")
   if gear then
-    Events.chooseGear(player, tonumber(gear))   -- the host may pick for the crashed rider
+    Events.chooseGear(player, tonumber(gear), color)   -- the host may pick for an absent rider
     return
   end
   if color ~= player.color then return end   -- panel is only shown to its owner anyway

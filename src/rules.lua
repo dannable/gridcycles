@@ -21,6 +21,8 @@
 --     winner = color|false,
 --     pendingGear = color|false,      -- a rider who crashed and must choose their respawn gear
 --     bonusMove = color|false,        -- an Overclocking rider who still has their second move
+--     pickingStart = bool,            -- riders are still secretly choosing starting gears
+--     startPicks = { [color] = gear }, -- picks so far (hidden until everyone has picked)
 --   }
 --   Each rider also has `ability` (id or nil) and `charged`; see src/riders/riders.lua.
 --
@@ -312,6 +314,8 @@ function Rules.newState(colors, rollFn)
     winner = false,    -- colour of the winner once the game is won
     pendingGear = false,
     bonusMove = false,
+    pickingStart = Config.blindStartGear == true,
+    startPicks = {},
   }
   for i, c in ipairs(colors) do state.order[i] = c end
   for _, c in ipairs(state.order) do
@@ -609,6 +613,38 @@ function Rules.resolveMove(state, color, move, rollFn)
   return result
 end
 
+-- Blind start: each rider secretly picks a starting gear (and may change it until the
+-- last pick is in). Then all picks are revealed together; riders who picked the same
+-- gear as someone else stall to the lowest gear. The first round is ordered by the
+-- revealed gears. Returns true, reveal (nil until the last pick) or false and a reason:
+-- "none" (not picking), "who" (no such rider), "range" (no such gear).
+-- reveal = { [color] = { picked = gear, stalled = bool } }
+function Rules.chooseStartGear(state, color, gear)
+  if not state.pickingStart then return false, "none" end
+  if state.riders[color] == nil then return false, "who" end
+  if type(gear) ~= "number" or gear ~= math.floor(gear)
+    or gear < Config.gears.min or gear > Config.gears.max then return false, "range" end
+  state.startPicks[color] = gear
+  for _, c in ipairs(state.order) do
+    if state.startPicks[c] == nil then return true, nil end
+  end
+  local count = {}
+  for _, c in ipairs(state.order) do
+    local g = state.startPicks[c]
+    count[g] = (count[g] or 0) + 1
+  end
+  local reveal = {}
+  for _, c in ipairs(state.order) do
+    local g = state.startPicks[c]
+    local stalled = count[g] > 1
+    state.riders[c].gear = stalled and Config.gears.min or g
+    reveal[c] = { picked = g, stalled = stalled }
+  end
+  state.pickingStart = false
+  startRound(state)
+  return true, reveal
+end
+
 -- A rider who just crashed picks any gear to respawn in. Returns true, or false and a
 -- reason: "none" (nobody is choosing), "who" (not that rider), "range" (no such gear).
 function Rules.chooseGear(state, color, gear)
@@ -627,10 +663,11 @@ end
 
 -- Pass play to the next rider this round; after the last, start a new round (the order
 -- is re-sorted by gear and the tie-breaker moves on). Returns true if a new round began.
--- No-op once the game is won, while a crashed rider still has to choose their gear, or
--- while an Overclocking rider still has their second move.
+-- No-op once the game is won, while starting gears are being picked, while a crashed
+-- rider still has to choose their gear, or while an Overclocking rider still has their
+-- second move.
 function Rules.advanceTurn(state)
-  if state.winner or state.pendingGear or state.bonusMove then return false end
+  if state.winner or state.pendingGear or state.bonusMove or state.pickingStart then return false end
   if state.turn < #state.roundOrder then
     state.turn = state.turn + 1
     return false
@@ -652,6 +689,7 @@ function Rules.isValidState(state)
   if type(state.riders) ~= "table" or type(state.prizms) ~= "table" then return false end
   if state.pendingGear and state.riders[state.pendingGear] == nil then return false end
   if state.bonusMove and state.riders[state.bonusMove] == nil then return false end
+  if state.pickingStart and type(state.startPicks) ~= "table" then return false end
   for _, c in ipairs(state.order) do
     local r = state.riders[c]
     if type(r) ~= "table" or type(r.pose) ~= "table" or type(r.trail) ~= "table"
@@ -688,7 +726,7 @@ end
 -- otherwise, where reason is "over" | "pick" | "turn" | "gear" | "far".
 function Rules.validateTileDrop(state, color, gear, kind, pos, shape, overclock)
   if state.winner then return false, "over" end
-  if state.pendingGear then return false, "pick" end
+  if state.pendingGear or state.pickingStart then return false, "pick" end
   if Rules.currentColor(state) ~= color then return false, "turn" end
   local rider = state.riders[color]
   local shift = gear - rider.gear

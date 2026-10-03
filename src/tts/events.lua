@@ -14,6 +14,7 @@ Events = {
     prizmsToWin = Config.prizmsToWin,
     abilities = Config.abilitiesEnabled,
     mode = Config.placementMode,
+    blindStart = Config.blindStartGear,
   },
 }
 
@@ -88,6 +89,7 @@ local function applySettings(s)
   Config.prizmsToWin = s.prizmsToWin
   Config.abilitiesEnabled = s.abilities
   Config.placementMode = s.mode
+  Config.blindStartGear = s.blindStart == true   -- saves from before this setting started at G1
 end
 
 -- Forget the current rider's half-made choices (shift, armed abilities).
@@ -117,13 +119,17 @@ function Events.newGame(colors)
   State.settings = {
     maxPlayers = Events.settings.maxPlayers, prizmsToWin = Events.settings.prizmsToWin,
     abilities = Events.settings.abilities, mode = Events.settings.mode,
+    blindStart = Events.settings.blindStart,
   }
   UI_.clearLog()
   Spawn.rebuild(State)
   syncTurns()
   UI_.rebuild(State.order)
+  local start = State.pickingStart
+    and "Everyone: secretly choose a starting gear. Riders who pick the same gear stall to G1."
+    or (State.roundOrder[1] .. " goes first.")
   say("New game: " .. table.concat(colors, ", ") .. ". First to hold " .. Config.prizmsToWin
-    .. " Prizms of their colour wins. " .. State.roundOrder[1] .. " goes first.", rgb(State.roundOrder[1]))
+    .. " Prizms of their colour wins. " .. start, rgb(State.roundOrder[1]))
   for _, c in ipairs(State.order) do
     local id = State.riders[c].ability
     if id then say(c .. " rides as " .. Riders.name(id) .. ": " .. Riders.text(id), rgb(c)) end
@@ -142,6 +148,7 @@ function Events.lobbyClick(player, action)
   elseif action == "prizms_dec" then s.prizmsToWin = math.max(1, s.prizmsToWin - 1)
   elseif action == "prizms_inc" then s.prizmsToWin = math.min(6, s.prizmsToWin + 1)
   elseif action == "abilities" then s.abilities = not s.abilities
+  elseif action == "blindstart" then s.blindStart = not s.blindStart
   elseif action == "mode" then
     s.mode = (s.mode == "hand") and "commit" or "hand"
   elseif action == "start" then
@@ -174,6 +181,10 @@ local function mayAct(playerColor)
   end
   if State.winner then
     printToColor("The game is over. The host can go back to the lobby.", playerColor, { 1, 1, 1 })
+    return false
+  end
+  if State.pickingStart then
+    printToColor("Riders are still choosing their starting gears.", playerColor, { 1, 1, 1 })
     return false
   end
   if State.pendingGear then
@@ -330,11 +341,46 @@ function Events.commitMove(playerColor, kind, curve)
   end
 end
 
--- A crashed rider picks their respawn gear (the host may pick for them, so an absent
--- player can't stall the table). `player` is the clicking TTS player: { color, host }.
-function Events.chooseGear(player, gear)
-  if State == nil or not State.pendingGear then return end
-  local color = State.pendingGear
+-- Blind start: `color` secretly picks a starting gear. The value is never shown until
+-- everyone has picked; then all picks are revealed and the first round begins.
+local function chooseStartGear(color, gear)
+  local ok, reveal = Rules.chooseStartGear(State, color, gear)
+  if not ok then return end
+  if reveal == nil then
+    say(color .. " has chosen a starting gear.", rgb(color))
+    UI_.refresh()
+    return
+  end
+  for _, c in ipairs(State.order) do
+    local v = reveal[c]
+    if v.stalled then
+      say(c .. " picked G" .. v.picked .. ", same as someone else: stalls to G" .. State.riders[c].gear .. ".", rgb(c))
+    else
+      say(c .. " starts in G" .. v.picked .. ".", rgb(c))
+    end
+  end
+  announceRound()
+  syncTurns()
+  UI_.refresh()
+end
+
+-- The gear picker: a crashed rider's respawn gear, or a secret starting gear. The host
+-- may pick for anyone, so an absent player can't stall the table. `player` is the
+-- clicking TTS player: { color, host }; `color` is the rider the button belongs to.
+function Events.chooseGear(player, gear, color)
+  if State == nil then return end
+  if State.pickingStart then
+    color = color or player.color
+    if player.color ~= color and not player.host then
+      printToColor("Only " .. color .. " (or the host) can choose that.", player.color, { 1, 1, 1 })
+      return
+    end
+    chooseStartGear(color, gear)
+    return
+  end
+  if not State.pendingGear then return end
+  if color ~= nil and color ~= State.pendingGear then return end
+  color = State.pendingGear
   if player.color ~= color and not player.host then
     printToColor("Only " .. color .. " (or the host) can choose that.", player.color, { 1, 1, 1 })
     return
@@ -349,7 +395,7 @@ end
 -- if the drop was legal, the move is committed through the normal pipeline.
 local DROP_MESSAGES = {
   turn = "It isn't your turn.",
-  pick = "A crashed rider has to choose a respawn gear first.",
+  pick = "Wait until the gear picks are done.",
   over = "The game is over.",
   gear = "That tile is more than %d gear(s) from your current gear (G%d).",
   overclock = "An Overclock move needs a G1 tile.",

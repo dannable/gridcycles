@@ -5,7 +5,7 @@ Tabletop Simulator mod: neon light-cycle racing, an original reskin inspired by 
 
 ## Current status
 
-- **M0-M4 done and playtested. M5 (hand mode) code done, awaiting playtest. M6 art in progress: bike model in (pinned to tag v0.2-playtest); mat, tiles, Prizms, cards and rules PDF still to do. M7 abilities code done (src/riders/riders.lua), awaiting playtest. Rules backlog (PLAN.md section 10) partly done: typed supply, curve die, victims, Prizm stealing/nudge/lock, turn order, respawn gear.** Known: mat 36x36 overhangs the default hex table; use Options > Table > None.
+- **M0-M4 done and playtested. M5 (hand mode) code done, awaiting playtest. M6 art in progress: bike model in (pinned to tag v0.2-playtest); mat, tiles, Prizms, cards and rules PDF still to do. M7 abilities code done (src/riders/riders.lua), awaiting playtest. Rules backlog (PLAN.md section 10) done except Power Prizms and table sizes (need David's call); latest additions (blind start gear, launch wall, two-turn scoring, Prizm slide) await playtest.** Known: mat 36x36 overhangs the default hex table; use Options > Table > None.
 - Track milestone progress by ticking the table in PLAN.md section 7 as milestones complete.
 
 ## Commands

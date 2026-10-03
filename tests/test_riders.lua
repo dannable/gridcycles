@@ -8,6 +8,7 @@ local function newState(redAbility, blueAbility, prizms)
   st.riders.Blue.pose = { x = 10, z = 10, heading = 180 }
   st.riders.Red.ability, st.riders.Red.charged = redAbility, redAbility ~= nil
   st.riders.Blue.ability, st.riders.Blue.charged = blueAbility, blueAbility ~= nil
+  st.pickingStart = false
   st.prizms = prizms or {}
   st.nextPrizmId = 100
   return st

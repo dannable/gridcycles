@@ -19,15 +19,16 @@ Name: **Gridcycles**. It's an original reskin inspired by *Lazer Ryderz* (Greate
 | Element | v1 rule |
 |---|---|
 | Win | First to hold **3 Prizms of their colour on the table at once** wins. |
-| Setup | One unscored Prizm per rider, evenly spaced on a ring round the centre. Each rider gets a random launch point and heading on the mat edge (bike tail on the edge) (this replaces the original's "eyes-closed edge placement"). |
+| Setup | One unscored Prizm per rider, evenly spaced on a ring round the centre. Each rider gets a random launch point and heading on the mat edge (this replaces blind edge placement). The launch is a **wall piece** under the bike, from the mat edge to its nose: it stays after the bike moves on, blocks everyone (its owner too, once they've left it) and goes when its owner crashes. |
 | Speed | 5 gears. At the start of your turn, shift up 1, down 1 or hold. Each gear has its own tile length (G1 shortest, G5 longest). |
+| Starting gear | Everyone secretly picks a starting gear; picks are revealed together and riders who picked the same gear **stall to G1** (the host can pick for an absent player). A lobby toggle starts everyone at G1 instead. |
 | Tiles | Each rider owns a limited set of pieces: per gear, 2 straights, 2 soft curves and 2 hard curves, except gear 4 (no hard curves) and gear 5 (straights only). See `Config.tileSupply`. Laid tiles stay out until the rider crashes, which returns everything. |
 | Out of pieces | If the exact piece is gone, use the same kind from the next gear down (a curve tries the other curve shape in the same gear first). If nothing at your gear or below is left, your **oldest tiles come off the line one at a time** until a piece fits. Your gear is unchanged. |
 | Move | Choose **Straight**, or a **soft** or **hard** curve to the left or right, at your current gear. The tile attaches to your trail end. |
 | Turn check | The curve die has faces 1, 2, 3, 4, 5 and a spin-out face. A numbered face **≥ your gear** succeeds (place the curve); a lower one fails (place a straight instead). The **spin-out** face (1 in 6, any gear) places the curve, then drops you to G1. |
 | Respawn | After a crash you respawn at a random edge point and **choose any gear** (the host can pick for you). Your turn ends once you have. |
 | Crash | If your new tile crosses any trail, **any rider's bike**, or leaves the mat, you crash. A bike is part of its owner's trail: it sits on the end of their last tile, nose on the trail end, and never blocks its owner. Your trail is removed, you respawn at a new random edge point at G1, and you keep your captured Prizms. |
-| Capture | If your tile fully crosses an unscored Prizm's long axis (within half a wall width of its ends), you **score** it: it takes your colour and stays where it is, and a new unscored Prizm is tossed onto the table. Crossing another rider's scored Prizm **steals** it (no new Prizm). Scored Prizms stay on the table when their owner crashes. |
+| Capture | If your tile fully crosses an unscored Prizm's long axis (within half a wall width of its ends), you **score** it: it takes your colour and **slides to the front of the tile** that took it, across your line, and a new unscored Prizm is tossed onto the table. Crossing another rider's scored Prizm **steals** it (it slides the same way; no new Prizm). A tile that **stops on top of** a Prizm (within half the Prizm's width of its axis) hasn't crossed it yet, and doesn't nudge it: your next tile can finish the crossing. Scored Prizms stay on the table when their owner crashes. |
 | Pass-through | Contact right on top of a Prizm never crashes, so a Prizm is a gap in any wall. |
 | Nudge | A tile that touches an unscored Prizm without scoring pushes it clear (one wall width from every wall). A Prizm is **locked** and never nudged if it sits on its owner's own line, or lines of two different colours touch it. |
 | Crash victim | If you crash into another rider's tile, they lose that tile and every tile older than it (their front tile always stays); the pieces return to their supply. Hitting a bike or your own wall costs nobody else anything. |
@@ -177,13 +178,11 @@ Team mode (2v2, allies can cross each other's trails), Prizm relay (carry a Priz
 
 ## 10. Rules backlog (from comparing with the tabletop game's published rules)
 
-Done: choosing your gear when you respawn; typed, limited pieces; substitution and oldest-tile removal; the curve die (spin-out face); crash victims lose pieces; Prizm scoring, stealing, pass-through, nudge and locking; the three-at-once win; unscored Prizms evenly spaced on a ring, replaced when scored; turn order by gear with a rotating tie-breaker.
+Done: choosing your gear when you respawn; typed, limited pieces; substitution and oldest-tile removal; the curve die (spin-out face); crash victims lose pieces; Prizm scoring, stealing, pass-through, nudge and locking; the three-at-once win; unscored Prizms evenly spaced on a ring, replaced when scored; turn order by gear with a rotating tie-breaker; blind starting gear (matching picks stall to G1); the launch as a wall piece; scoring across two turns; a scored Prizm sliding to the front of its tile.
 
-Not yet matching, roughly by impact on play:
+Kept different on purpose: start positions are a random edge point, not placed blind by hand.
 
-1. **Starting gear.** Initial gears are chosen blind and equal picks stall to G1; we start everyone at G1. (Respawn gear is now chosen, see above.)
-2. **Launch point is a wall piece**, and start positions are placed blind. Ours is a random edge point and the launch is not part of the line.
-3. **Scoring across two turns.** A line that stops partway over a Prizm can finish scoring next turn; ours checks only the newly laid tile.
-4. **Scored Prizm placement.** The real game slides a newly scored Prizm to the front of the scoring tile; ours stays where it was crossed.
-5. **Power Prizms.** Per-rider one-shot powers, recharged when someone steals one of your Prizms (steals now exist).
-6. Table-size variants (small: no gear 5 / 4-soft / 3-hard; large: bonus G5 straight at launch).
+Not yet matching:
+
+1. **Power Prizms.** Per-rider one-shot powers, recharged when someone steals one of your Prizms. Overlaps with the M7 abilities: needs a decision on how they fit together.
+2. Table-size variants (small: no gear 5 / 4-soft / 3-hard; large: bonus G5 straight at launch). Needs a decision on mat sizes and what "bonus G5 straight at launch" should mean here.

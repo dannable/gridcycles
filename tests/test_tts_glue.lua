@@ -68,8 +68,10 @@ end })
 dofile("src/tts/spawn.lua")
 dofile("src/tts/ui.lua")
 dofile("src/tts/events.lua")
--- Abilities are dealt at random; keep them off except in the tests that cover them.
+-- Abilities are dealt at random, and a blind start holds every game until gears are
+-- picked; keep both off except in the tests that cover them.
 Events.settings.abilities = false
+Events.settings.blindStart = false
 
 local function count(tag) return #getObjectsWithTag(tag) end
 
@@ -832,5 +834,92 @@ describe("Rider abilities (stubbed)", function()
     assert_eq(State.bonusMove, "Red")
     Events.settings.mode = "commit"
     Config.placementMode = "commit"
+  end)
+end)
+
+describe("Blind starting gear (stubbed)", function()
+  local host = { color = "Red", host = true }
+  local function start(colors)
+    Events.settings.mode = "commit"
+    Events.settings.blindStart = true
+    Events.settings.maxPlayers = 4
+    seated = colors
+    broadcasts = {}
+    Events.newGame()
+    Events.settings.blindStart = false
+  end
+  local function said(text)
+    for _, m in ipairs(broadcasts) do if m:find(text, 1, true) then return true end end
+    return false
+  end
+
+  it("the lobby toggle switches between a blind pick and everyone at G1", function()
+    Events.toLobby()
+    Events.settings.blindStart = true
+    UI_.refresh()
+    assert_eq(uiText.gcl_blindstart, "Blind pick")
+    Events.lobbyClick(host, "blindstart")
+    assert_false(Events.settings.blindStart)
+    assert_eq(uiText.gcl_blindstart, "All G1")
+    assert_true(uiText.xml:find('id="gcl_blindstart"', 1, true) ~= nil)
+  end)
+
+  it("a new game shows every rider's picker and blocks moves", function()
+    start({ "Red", "Blue" })
+    assert_true(State.pickingStart)
+    assert_true(said("secretly choose a starting gear"))
+    assert_eq(attrs["gcPick_Red.active"], "true")
+    assert_eq(attrs["gcPick_Blue.active"], "true")
+    assert_true(uiText.gcPickTitle_Red:find("starting gear", 1, true) ~= nil)
+    assert_true(uiText.gcStatus:find("starting gears", 1, true) ~= nil)
+    Events.commitMove("Red", "straight")
+    assert_eq(#State.riders.Red.trail.tiles, 0)
+    assert_true(private[#private].msg:find("starting gears", 1, true) ~= nil)
+  end)
+
+  it("a pick is announced without its gear, and that rider's picker closes", function()
+    UI_.handle({ color = "Red", host = false }, "gcb_Red_gear4")
+    assert_true(said("Red has chosen a starting gear."))
+    assert_false(said("G4"))
+    assert_eq(attrs["gcPick_Red.active"], "false")
+    assert_eq(attrs["gcPick_Blue.active"], "true")
+    assert_true(uiText.gcOdds_Red:find("Waiting for the others", 1, true) ~= nil)
+    UI_.handle({ color = "Red", host = false }, "gcb_Blue_gear2")
+    assert_eq(State.startPicks.Blue, nil, "can't pick for someone else")
+  end)
+
+  it("the last pick reveals everyone and starts round 1, fastest first", function()
+    UI_.handle({ color = "Blue", host = false }, "gcb_Blue_gear2")
+    assert_false(State.pickingStart)
+    assert_true(said("Red starts in G4."))
+    assert_true(said("Blue starts in G2."))
+    assert_true(said("Round 1 order: Red, Blue"))
+    assert_eq(Turns.turn_color, "Red")
+    assert_eq(attrs["gcPick_Blue.active"], "false")
+    Events.commitMove("Red", "straight")
+    assert_eq(#State.riders.Red.trail.tiles, 1)
+  end)
+
+  it("matching picks stall to G1; the host can pick for an absent rider", function()
+    start({ "Red", "Blue", "Green" })
+    UI_.handle({ color = "Red", host = true }, "gcb_Blue_gear3")
+    UI_.handle({ color = "Red", host = true }, "gcb_Red_gear3")
+    UI_.handle({ color = "Green", host = false }, "gcb_Green_gear5")
+    assert_true(said("Blue picked G3, same as someone else: stalls to G1."))
+    assert_true(said("Red picked G3, same as someone else: stalls to G1."))
+    assert_eq(State.riders.Green.gear, 5)
+    assert_eq(Rules.currentColor(State), "Green")
+  end)
+
+  it("a pick in progress survives save and load", function()
+    start({ "Red", "Blue" })
+    UI_.handle({ color = "Red", host = false }, "gcb_Red_gear2")
+    State = deepcopy(State)
+    assert_true(Rules.isValidState(State))
+    Events.restore()
+    assert_eq(attrs["gcPick_Red.active"], "false")
+    assert_eq(attrs["gcPick_Blue.active"], "true")
+    UI_.handle({ color = "Blue", host = false }, "gcb_Blue_gear5")
+    assert_false(State.pickingStart)
   end)
 end)
