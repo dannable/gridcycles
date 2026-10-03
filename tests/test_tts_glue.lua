@@ -68,6 +68,8 @@ end })
 dofile("src/tts/spawn.lua")
 dofile("src/tts/ui.lua")
 dofile("src/tts/events.lua")
+-- Abilities are dealt at random; keep them off except in the tests that cover them.
+Events.settings.abilities = false
 
 local function count(tag) return #getObjectsWithTag(tag) end
 
@@ -252,9 +254,11 @@ describe("Lobby and UI (stubbed)", function()
     Events.settings.prizmsToWin = 6
     Events.lobbyClick(host, "prizms_inc")
     assert_eq(Events.settings.prizmsToWin, 6)
+    local was = Events.settings.abilities
     Events.lobbyClick(host, "abilities")
-    assert_false(Events.settings.abilities)
+    assert_eq(Events.settings.abilities, not was)
     Events.lobbyClick(host, "abilities")
+    assert_eq(Events.settings.abilities, was)
   end)
 
   it("start applies settings to Config and builds rider panels", function()
@@ -646,5 +650,183 @@ describe("Respawn gear picker (stubbed)", function()
     assert_true(Rules.isValidState(State))
     Events.restore()
     assert_eq(attrs["gcPick_Blue.active"], "true")
+  end)
+end)
+
+describe("Rider abilities (stubbed)", function()
+  -- Two-rider commit game with the given abilities, Red to move from (0, -10).
+  local function game(red, blue)
+    Events.settings.mode = "commit"
+    Events.settings.abilities = true
+    seated = { "Red", "Blue" }
+    Events.newGame()
+    Events.settings.abilities = false
+    State.riders.Red.ability, State.riders.Red.charged = red, true
+    State.riders.Blue.ability, State.riders.Blue.charged = blue, true
+    State.roundOrder, State.turn = { "Red", "Blue" }, 1
+    State.riders.Red.pose = { x = 0, z = -10, heading = 0 }
+    State.riders.Blue.pose = { x = 10, z = 10, heading = 180 }
+    State.prizms = {}
+    UI_.rebuild(State.order)
+  end
+
+  it("a new game with abilities on deals one to each rider and announces it", function()
+    Events.settings.abilities = true
+    seated = { "Red", "Blue" }
+    broadcasts = {}
+    Events.newGame()
+    Events.settings.abilities = false
+    for _, c in ipairs(State.order) do
+      local id = State.riders[c].ability
+      assert_true(Riders.defs[id] ~= nil)
+      local said = false
+      for _, m in ipairs(broadcasts) do
+        if m:find(c .. " rides as " .. Riders.name(id), 1, true) then said = true end
+      end
+      assert_true(said, "announced " .. c)
+    end
+    assert_true(uiText.gcRiders:find(Riders.name(State.riders.Red.ability), 1, true) ~= nil)
+  end)
+
+  it("panels for every ability generate balanced XML with their buttons", function()
+    Events.settings.abilities = true
+    Events.settings.maxPlayers = 4
+    seated = { "Red", "Blue", "Green", "Yellow" }
+    Events.newGame()
+    Events.settings.abilities = false
+    for i, c in ipairs(State.order) do State.riders[c].ability = Riders.order[i] end
+    local xml = UI_.buildXml(State.order)
+    local opens, closes, selfc = 0, 0, 0
+    for tag in xml:gmatch("<(/?)[%a]+[^>]*>") do
+      if tag == "/" then closes = closes + 1 else opens = opens + 1 end
+    end
+    for _ in xml:gmatch("/>") do selfc = selfc + 1 end
+    assert_eq(opens - selfc, closes)
+    assert_true(xml:find("gcb_Red_boost", 1, true) ~= nil)
+    assert_true(xml:find("gcb_Green_shiftdown2", 1, true) ~= nil)
+    assert_true(xml:find("gcb_Yellow_overclock", 1, true) ~= nil)
+    assert_true(xml:find("gcAbility_Blue", 1, true) ~= nil)
+  end)
+
+  it("abilities off: no ability line, no extra buttons", function()
+    seated = { "Red", "Blue" }
+    Events.newGame()
+    assert_eq(State.riders.Red.ability, nil)
+    assert_true(uiText.xml:find("gcAbility_", 1, true) == nil)
+    assert_eq(uiText.gcRiders, "")
+  end)
+
+  it("Echo gets +-2 shift buttons that work; other riders don't", function()
+    game("echo", "vixen")
+    assert_true(uiText.xml:find("gcb_Red_shiftup2", 1, true) ~= nil)
+    assert_true(uiText.xml:find("gcb_Blue_shiftup2", 1, true) == nil)
+    assert_true(uiText.gcAbility_Red:find("Echo", 1, true) ~= nil)
+    UI_.handle({ color = "Red" }, "gcb_Red_shiftup2")
+    assert_eq(Events.pendingShift, 2)
+    assert_true(uiText.gcOdds_Red:find("After shift: G3", 1, true) ~= nil, uiText.gcOdds_Red)
+    UI_.handle({ color = "Red" }, "gcb_Red_straight")
+    assert_eq(State.riders.Red.gear, 3)
+    UI_.handle({ color = "Blue" }, "gcb_Blue_shiftup2")
+    assert_eq(Events.pendingShift, 0, "a non-Echo rider can't shift 2")
+  end)
+
+  it("Volt Vixen arms, saves a failed curve, then shows as used", function()
+    game("vixen", "echo")
+    State.riders.Red.gear = 5
+    UI_.handle({ color = "Red" }, "gcb_Red_boost")
+    assert_true(Events.pendingBoost)
+    assert_true(uiText.gcAbility_Red:find("ARMED", 1, true) ~= nil)
+    UI_.handle({ color = "Red" }, "gcb_Red_boost")
+    assert_false(Events.pendingBoost, "pressing again disarms")
+    UI_.handle({ color = "Red" }, "gcb_Red_boost")
+    local real = math.random
+    math.random = function() return 1 end   -- the roll fails at G5
+    UI_.handle({ color = "Red" }, "gcb_Red_softleft")
+    math.random = real
+    local tiles = State.riders.Red.trail.tiles
+    assert_eq(tiles[#tiles].kind, "left")
+    assert_false(State.riders.Red.charged)
+    assert_false(Events.pendingBoost)
+    assert_true(broadcasts[#broadcasts]:find("VOLT", 1, true) ~= nil or broadcasts[#broadcasts - 1]:find("VOLT", 1, true) ~= nil)
+    assert_true(uiText.gcAbility_Red:find("(used)", 1, true) ~= nil)
+    assert_eq(attrs["gcb_Red_boost.interactable"], "false")
+  end)
+
+  it("Overclock arms, moves twice at G1, and the turn passes after the second", function()
+    game("overclock", "echo")
+    State.riders.Red.gear = 4
+    UI_.handle({ color = "Red" }, "gcb_Red_overclock")
+    assert_true(Events.pendingOverclock)
+    assert_true(uiText.gcOdds_Red:find("Overclock: G1", 1, true) ~= nil, uiText.gcOdds_Red)
+    assert_eq(attrs["gcb_Red_shiftup.interactable"], "false", "no shifting while overclocking")
+    UI_.handle({ color = "Red" }, "gcb_Red_straight")
+    assert_eq(State.riders.Red.gear, 1)
+    assert_eq(State.bonusMove, "Red")
+    assert_eq(Rules.currentColor(State), "Red", "Red moves again")
+    assert_true(uiText.gcOdds_Red:find("second move", 1, true) ~= nil, uiText.gcOdds_Red)
+    assert_eq(attrs["gcb_Red_straight.interactable"], "true")
+    UI_.handle({ color = "Red" }, "gcb_Red_straight")
+    assert_eq(#State.riders.Red.trail.tiles, 2)
+    assert_eq(State.bonusMove, false)
+    assert_eq(Rules.currentColor(State), "Blue")
+    assert_true(uiText.gcAbility_Red:find("until you respawn", 1, true) ~= nil)
+  end)
+
+  it("a bonus move survives save and load", function()
+    game("overclock", "echo")
+    UI_.handle({ color = "Red" }, "gcb_Red_overclock")
+    UI_.handle({ color = "Red" }, "gcb_Red_straight")
+    State = deepcopy(State)
+    assert_true(Rules.isValidState(State))
+    Events.restore()
+    assert_eq(State.bonusMove, "Red")
+    assert_true(uiText.xml:find("gcb_Red_overclock", 1, true) ~= nil)
+    UI_.handle({ color = "Red" }, "gcb_Red_straight")
+    assert_eq(Rules.currentColor(State), "Blue")
+  end)
+
+  it("Gridlock's removed rival tile disappears from the table", function()
+    game("gridlock", "echo")
+    State.prizms = { { id = 1, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } }
+    Spawn.prizm(State.prizms[1])
+    State.roundOrder, State.turn = { "Blue", "Red" }, 1
+    State.riders.Blue.pose = { x = 1.5, z = -10, heading = 0 }
+    Events.commitMove("Blue", "straight")
+    State.roundOrder, State.turn = { "Blue", "Red" }, 1
+    Events.commitMove("Blue", "straight")
+    assert_eq(count("gc_tile_Blue_1"), 3, "wall + divider + plate")
+    assert_eq(Rules.currentColor(State), "Red")
+    Events.commitMove("Red", "straight")
+    assert_eq(count("gc_tile_Blue_1"), 0)
+    assert_true(count("gc_tile_Blue_2") > 0, "front tile stays")
+    local said = false
+    for _, m in ipairs(broadcasts) do if m:find("GRIDLOCK removes a Blue tile", 1, true) then said = true end end
+    assert_true(said)
+  end)
+
+  local function tileObj(color, gear, label, c)
+    local o = makeObj({ position = { c.x, 2, c.z } })
+    o.setName(color .. " G" .. gear .. " " .. label)
+    return o
+  end
+
+  it("hand mode: an armed Overclock only takes a G1 tile", function()
+    game("overclock", "echo")
+    Events.settings.mode = "hand"
+    Config.placementMode = "hand"
+    State.riders.Red.gear = 2
+    UI_.handle({ color = "Red" }, "gcb_Red_overclock")
+    assert_true(uiText.gcOdds_Red:find("drag a G1 tile", 1, true) ~= nil, uiText.gcOdds_Red)
+    local pose = State.riders.Red.pose
+    local c2 = Geom.tileCenter("straight", 2, pose)
+    Events.handleDrop("Red", tileObj("Red", 2, "Straight", c2))
+    assert_eq(#State.riders.Red.trail.tiles, 0)
+    assert_true(private[#private].msg:find("G1 tile", 1, true) ~= nil)
+    local c1 = Geom.tileCenter("straight", 1, pose)
+    Events.handleDrop("Red", tileObj("Red", 1, "Straight", c1))
+    assert_eq(#State.riders.Red.trail.tiles, 1)
+    assert_eq(State.bonusMove, "Red")
+    Events.settings.mode = "commit"
+    Config.placementMode = "commit"
   end)
 end)

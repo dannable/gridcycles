@@ -3,15 +3,28 @@
 -- and event-log panel. The XML is generated here (UI_.buildXml) because rider
 -- panels depend on who is seated; ui/Global.xml is just a boot stub.
 --
--- Element ids:  gcLobby, gcl_*  lobby      gcStatusPanel, gcStatus, gcScore, gcOrder, gcLog
+-- Element ids:  gcLobby, gcl_*  lobby      gcStatusPanel, gcStatus, gcScore, gcRiders, gcOrder, gcLog
 --               gcPick_<Color>, gcb_<Color>_gear<N>  respawn gear picker
---               gcPanel_<Color>, gcGear_<Color>, gcOdds_<Color>, gcb_<Color>_<action>
+--               gcPanel_<Color>, gcGear_<Color>, gcOdds_<Color>, gcAbility_<Color>, gcb_<Color>_<action>
+--               (abilities: gcb_<Color>_shiftdown2 / shiftup2 for Echo, _boost, _overclock)
 -- Every button uses onClick="gcClick"; the id says what was pressed.
 
 UI_ = {}  -- UI is a reserved TTS global; use UI_ for our helpers
 
-local SHIFT_NAMES = { [-1] = "down", [0] = "hold", [1] = "up" }
-local SHIFT_ACTIONS = { shiftdown = -1, shifthold = 0, shiftup = 1 }
+local SHIFT_NAMES = { [-2] = "down 2", [-1] = "down", [0] = "hold", [1] = "up", [2] = "up 2" }
+local SHIFT_ACTIONS = { shiftdown2 = -2, shiftdown = -1, shifthold = 0, shiftup = 1, shiftup2 = 2 }
+local ABILITY_ACTIONS = { boost = true, overclock = true }
+
+-- The current game's ability for `color` (nil in the lobby or with abilities off).
+local function abilityOf(color)
+  local r = State and State.riders and State.riders[color]
+  return r and r.ability or nil
+end
+
+-- Does this rider's panel have the button for a shift of `v`? (+-2 is Echo only.)
+local function hasShift(color, v)
+  return math.abs(v) <= Config.gears.maxShift or abilityOf(color) == "echo"
+end
 -- action -> { kind, curve }
 local MOVE_ACTIONS = {
   hardleft = { "left", "hard" }, softleft = { "left", "soft" }, straight = { "straight" },
@@ -69,11 +82,12 @@ end
 
 local function statusXml()
   return [[
-<Panel id="gcStatusPanel" active="false" width="360" height="272" rectAlignment="UpperRight"
+<Panel id="gcStatusPanel" active="false" width="360" height="296" rectAlignment="UpperRight"
        offsetXY="-20 -70" color="#0A0618D9" padding="10 10 10 10">
   <VerticalLayout spacing="4">
     <Text id="gcStatus" fontSize="18" color="#05D9E8" alignment="MiddleCenter" preferredHeight="28">Gridcycles</Text>
     <Text id="gcScore" fontSize="14" color="#D9C8FF" alignment="MiddleCenter" preferredHeight="22"></Text>
+    <Text id="gcRiders" fontSize="12" color="#D9C8FF" alignment="MiddleCenter" preferredHeight="20"></Text>
     <Text id="gcOrder" fontSize="13" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="20"></Text>
     <Text id="gcLog" fontSize="13" color="#FFFFFF" alignment="UpperLeft"></Text>
     <Button id="gcl_menu" onClick="gcClick" color="#444444" textColor="#FFFFFF" fontSize="14" preferredHeight="26">Back to lobby (host)</Button>
@@ -86,22 +100,43 @@ local function riderXml(color)
   local function b(action, label, bg, fg)
     return button("gcb_" .. color .. "_" .. action, label, bg, fg)
   end
+  local ability = abilityOf(color)
+  local shifts = b("shiftdown", "Shift down", "#2A1B5C") .. b("shifthold", "Hold", "#2A1B5C")
+    .. b("shiftup", "Shift up", "#2A1B5C")
+  if ability == "echo" then
+    shifts = b("shiftdown2", "Down 2", "#2A1B5C") .. shifts .. b("shiftup2", "Up 2", "#2A1B5C")
+  end
+  local extra, height = "", 372
+  if ability then
+    local armButton = ""
+    if ability == "vixen" then
+      armButton = b("boost", "Arm Volt (next curve can't fail)", "#2A1B5C")
+    elseif ability == "overclock" then
+      armButton = b("overclock", "Arm Overclock (2 moves at G1)", "#2A1B5C")
+    end
+    extra = string.format('\n    <Text id="gcAbility_%s" fontSize="12" color="%s" alignment="MiddleCenter" preferredHeight="34"></Text>',
+      color, h)
+    height = height + 38
+    if armButton ~= "" then
+      extra = extra .. '\n    <HorizontalLayout spacing="8" preferredHeight="30">' .. armButton .. "</HorizontalLayout>"
+      height = height + 34
+    end
+  end
   return string.format([[
-<Panel id="gcPanel_%s" active="false" visibility="%s" width="520" height="372" rectAlignment="LowerCenter"
+<Panel id="gcPanel_%s" active="false" visibility="%s" width="520" height="%d" rectAlignment="LowerCenter"
        offsetXY="0 20" color="#0A0618E6" padding="10 10 10 10">
   <VerticalLayout spacing="5">
     <Text id="gcGear_%s" fontSize="22" color="%s" alignment="MiddleCenter" fontStyle="Bold" preferredHeight="30"></Text>
-    <Text id="gcOdds_%s" fontSize="14" color="#D9C8FF" alignment="MiddleCenter" preferredHeight="22"></Text>
+    <Text id="gcOdds_%s" fontSize="14" color="#D9C8FF" alignment="MiddleCenter" preferredHeight="22"></Text>%s
     <Text fontSize="12" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="16">YOUR TEMPLATES LEFT (shape: soft / hard curves)</Text>
     <Text id="gcSupply_%s" fontSize="13" color="#FFFFFF" alignment="MiddleCenter" preferredHeight="88"></Text>
     <Text id="gcWarn_%s" fontSize="12" color="#FFB000" alignment="MiddleCenter" preferredHeight="34"></Text>
     <Text fontSize="12" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="16">1. choose a shift (optional)</Text>
-    <HorizontalLayout spacing="8" preferredHeight="34">%s%s%s</HorizontalLayout>
+    <HorizontalLayout spacing="8" preferredHeight="34">%s</HorizontalLayout>
     <Text fontSize="12" color="#9A8FC0" alignment="MiddleCenter" preferredHeight="16">2. commit your move (no take-backs)</Text>
     <HorizontalLayout spacing="6" preferredHeight="38">%s%s%s%s%s</HorizontalLayout>
   </VerticalLayout>
-</Panel>]], color, color, color, h, color, color, color,
-    b("shiftdown", "Shift down", "#2A1B5C"), b("shifthold", "Hold", "#2A1B5C"), b("shiftup", "Shift up", "#2A1B5C"),
+</Panel>]], color, color, height, color, h, color, extra, color, color, shifts,
     b("hardleft", "Hard L", h, "#000000"), b("softleft", "Soft L", h, "#000000"), b("straight", "Straight", h, "#000000"),
     b("softright", "Soft R", h, "#000000"), b("hardright", "Hard R", h, "#000000"))
 end
@@ -209,6 +244,12 @@ function UI_.refresh()
     parts[#parts + 1] = string.format("%s %d/%d", c, Rules.prizmCount(State, c), Config.prizmsToWin)
   end
   UI.setValue("gcScore", "Prizms: " .. table.concat(parts, "  "))
+  local riders = {}
+  for _, c in ipairs(State.order) do
+    local id = State.riders[c].ability
+    if id then riders[#riders + 1] = c .. ": " .. Riders.name(id) end
+  end
+  UI.setValue("gcRiders", table.concat(riders, "  "))
   UI.setValue("gcOrder", string.format("Round %d: %s", State.round, table.concat(State.roundOrder, " > ")))
   UI.setValue("gcLog", table.concat(logLines, "\n"))
 
@@ -218,7 +259,9 @@ function UI_.refresh()
     setActive("gcPanel_" .. c, true)
     setActive("gcPick_" .. c, State.pendingGear == c)
     local shift = mine and Events.pendingShift or 0
-    local g = Rules.gearAfterShift(r.gear, shift)
+    local overclocking = mine and (State.bonusMove == c or Events.pendingOverclock)
+    local maxShift = Riders.maxShift(r)
+    local g = overclocking and Config.gears.min or Rules.gearAfterShift(r.gear, shift, maxShift)
     UI.setValue("gcGear_" .. c, string.format("GEAR %d  [%s]", r.gear, bar(r.gear)))
     if State.winner then
       UI.setValue("gcOdds_" .. c, "Game over")
@@ -228,15 +271,31 @@ function UI_.refresh()
       UI.setValue("gcOdds_" .. c, "Waiting for " .. State.pendingGear .. " to choose a gear...")
     elseif not mine then
       UI.setValue("gcOdds_" .. c, "Waiting for " .. cur .. "...")
+    elseif hand and overclocking then
+      UI.setValue("gcOdds_" .. c, (State.bonusMove == c and "Overclock second move: " or "Overclock: ")
+        .. "drag a G1 tile to where your trail ends")
     elseif hand then
       UI.setValue("gcOdds_" .. c, string.format(
         "Drag a tile (G%d-G%d) from your tray to where your trail ends",
-        Rules.gearAfterShift(r.gear, -1), Rules.gearAfterShift(r.gear, 1)))
+        Rules.gearAfterShift(r.gear, -maxShift, maxShift), Rules.gearAfterShift(r.gear, maxShift, maxShift)))
     else
       local ok, spin = Rules.curveOdds(g)
-      local txt = string.format("After shift: G%d (%s). Curve success %d%%, spin-out %d%%", g, SHIFT_NAMES[shift],
+      local head = overclocking and ((State.bonusMove == c and "Overclock second move" or "Overclock") .. ": G1")
+        or string.format("After shift: G%d (%s)", g, SHIFT_NAMES[shift])
+      local txt = string.format("%s. Curve success %d%%, spin-out %d%%", head,
         math.floor(ok * 100 + 0.5), math.floor(spin * 100 + 0.5))
       UI.setValue("gcOdds_" .. c, txt)
+    end
+    if r.ability then
+      local status = ""
+      if r.ability == "vixen" then
+        status = not r.charged and " (used)" or ((mine and Events.pendingBoost) and " ARMED" or " (ready)")
+      elseif r.ability == "overclock" then
+        status = State.bonusMove == c and " SECOND MOVE"
+          or (not r.charged and " (used until you respawn)"
+          or ((mine and Events.pendingOverclock) and " ARMED" or " (ready)"))
+      end
+      UI.setValue("gcAbility_" .. c, Riders.name(r.ability) .. status .. "\n" .. Riders.text(r.ability))
     end
     -- templates left, one line per gear; '>' marks the gear you'll be in after the shift
     local lines = {}
@@ -251,10 +310,23 @@ function UI_.refresh()
     UI.setValue("gcSupply_" .. c, table.concat(lines, "\n"))
     UI.setValue("gcWarn_" .. c, mine and not State.winner and UI_.substitutionNote(State, c, g) or "")
     for action, v in pairs(SHIFT_ACTIONS) do
-      local id = "gcb_" .. c .. "_" .. action
-      UI.setAttribute(id, "interactable", (mine and not hand) and "true" or "false")
-      UI.setAttribute(id, "color", (mine and v == Events.pendingShift) and "#05D9E8" or "#2A1B5C")
-      UI.setAttribute(id, "textColor", (mine and v == Events.pendingShift) and "#000000" or "#FFFFFF")
+      if hasShift(c, v) then
+        local id = "gcb_" .. c .. "_" .. action
+        local lit = mine and not overclocking and v == Events.pendingShift
+        UI.setAttribute(id, "interactable", (mine and not hand and not overclocking) and "true" or "false")
+        UI.setAttribute(id, "color", lit and "#05D9E8" or "#2A1B5C")
+        UI.setAttribute(id, "textColor", lit and "#000000" or "#FFFFFF")
+      end
+    end
+    local arm = (r.ability == "vixen" and "boost") or (r.ability == "overclock" and "overclock") or nil
+    if arm then
+      local armed = mine and ((arm == "boost" and Events.pendingBoost) or (arm == "overclock" and Events.pendingOverclock))
+      local can = mine and ((arm == "boost" and Riders.canBoost(r))
+        or (arm == "overclock" and Riders.canOverclock(r) and not State.bonusMove))
+      local id = "gcb_" .. c .. "_" .. arm
+      UI.setAttribute(id, "interactable", can and "true" or "false")
+      UI.setAttribute(id, "color", armed and "#05D9E8" or "#2A1B5C")
+      UI.setAttribute(id, "textColor", armed and "#000000" or "#FFFFFF")
     end
     for action in pairs(MOVE_ACTIONS) do
       UI.setAttribute("gcb_" .. c .. "_" .. action, "interactable", (mine and not hand) and "true" or "false")
@@ -285,6 +357,8 @@ function UI_.handle(player, id)
   if color ~= player.color then return end   -- panel is only shown to its owner anyway
   if SHIFT_ACTIONS[action] ~= nil then
     Events.setShift(player.color, SHIFT_ACTIONS[action])
+  elseif ABILITY_ACTIONS[action] then
+    Events.toggleAbility(player.color, action)
   elseif MOVE_ACTIONS[action] then
     Events.commitMove(player.color, MOVE_ACTIONS[action][1], MOVE_ACTIONS[action][2])
   end
