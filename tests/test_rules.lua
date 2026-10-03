@@ -11,8 +11,10 @@ local function seq(...)
 end
 
 -- Deterministic state: Red at the origin heading +z, no Prizms unless given.
+-- No rider abilities (tests/test_riders.lua covers those).
 local function newState(prizms)
   local st = Rules.newState({ "Red", "Blue" }, fixed(3))
+  st.riders.Red.ability, st.riders.Blue.ability = nil, nil
   st.riders.Red.pose = { x = 0, z = -10, heading = 0 }
   st.riders.Blue.pose = { x = 10, z = 10, heading = 180 }
   st.prizms = prizms or {}

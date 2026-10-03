@@ -20,7 +20,9 @@
 --     nextPrizmId = n,
 --     winner = color|false,
 --     pendingGear = color|false,      -- a rider who crashed and must choose their respawn gear
+--     bonusMove = color|false,        -- an Overclocking rider who still has their second move
 --   }
+--   Each rider also has `ability` (id or nil) and `charged`; see src/riders/riders.lua.
 --
 -- Pieces: every tile has a gear and a shape ("straight" | "soft" | "hard"); riders own a
 -- limited supply of each (Config.tileSupply). See Rules.planPiece for what happens
@@ -32,7 +34,10 @@
 -- A rider's bike is part of their trail (Geom.bikeSeg), blocking everyone but its owner.
 --
 -- Rules.resolveMove(state, color, move, rollFn) -> result
---   move   = { shift = -1|0|1, kind = "straight"|"left"|"right", curve = "soft"|"hard" }
+--   move   = { shift = -1|0|1, kind = "straight"|"left"|"right", curve = "soft"|"hard",
+--              boost = bool (Volt Vixen: a failed check still curves),
+--              overclock = bool (Overclock: drop to G1, then a second move) }
+--   Ability flags the rider can't use are ignored. Echo may shift further (Riders.maxShift).
 --   result = { outcome = "placed"|"crash"|"win",
 --              gear (rider's gear afterwards), roll, spunOut, wentStraight,
 --              kind (the tile actually laid), tileGear / shape (the piece used),
@@ -44,7 +49,10 @@
 --              nudged = { prizmId... }, spawned = { prizm... } (new unscored Prizms),
 --              crashReason = "bounds"|"trail"|"bike"|"supply" (crash only), crashOwner = colour
 --              whose trail/bike was hit (not for "bounds"), respawn = pose (crash only),
---              victim = { color, removedTiles = { id... } } (crash into someone else's trail) }
+--              victim = { color, removedTiles = { id... } } (crash into someone else's trail),
+--              boosted (Volt Vixen's charge saved a failed check), overclock (this move was
+--              an Overclock, first or second), bonusMove (the rider moves again now),
+--              gridlock = { { color, tileId }... } (rival tiles Gridlock removed) }
 
 Rules = {}
 
@@ -289,6 +297,7 @@ function Rules.newState(colors, rollFn)
     tieBreaker = 1,
     winner = false,    -- colour of the winner once the game is won
     pendingGear = false,
+    bonusMove = false,
   }
   for i, c in ipairs(colors) do state.order[i] = c end
   for _, c in ipairs(state.order) do
@@ -312,6 +321,7 @@ function Rules.newState(colors, rollFn)
     state.nextPrizmId = state.nextPrizmId + 1
     state.prizms[#state.prizms + 1] = seg
   end
+  if Config.abilitiesEnabled then Riders.deal(state, rollFn) end
   startRound(state)
   return state
 end
@@ -326,10 +336,12 @@ function Rules.crash(state, color, reason, owner, rollFn)
   rider.supply = fullSupply()
   rider.gear = Config.gears.min
   rider.pose = randomLaunch(state, rollFn, color)
+  Riders.onRespawn(rider)
   state.pendingGear = color
+  state.bonusMove = false
   return {
     outcome = "crash", crashReason = reason, crashOwner = owner,
-    gear = rider.gear, captured = {}, spawned = {}, scored = {}, stolen = {}, nudged = {},
+    gear = rider.gear, captured = {}, spawned = {}, scored = {}, stolen = {}, nudged = {}, gridlock = {},
     respawn = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading },
   }
 end
@@ -391,19 +403,53 @@ local function nudge(state, prizm, path)
   return false
 end
 
+-- Gridlock: remove the rival tile nearest to Prizm `prizm`, if one lies within
+-- gridlockReach. Front tiles (a bike sits on them) are never taken. The piece goes
+-- back to its owner. Returns { color, tileId } or nil.
+local function gridlockNearest(state, color, prizm)
+  local best, bestColor, bestIdx = Config.abilities.gridlockReach, nil, nil
+  for _, c in ipairs(state.order) do
+    local tiles = state.riders[c].trail.tiles
+    if c ~= color then
+      for i = 1, #tiles - 1 do
+        local d = Geom.pathDistance(tileSegs(tiles[i]), prizm)
+        if d <= best then best, bestColor, bestIdx = d, c, i end
+      end
+    end
+  end
+  if bestColor == nil then return nil end
+  local victim = state.riders[bestColor]
+  local t = table.remove(victim.trail.tiles, bestIdx)
+  victim.supply[t.gear][t.shape] = (victim.supply[t.gear][t.shape] or 0) + 1
+  victim.trail.segs = segsOf(victim.trail.tiles)
+  return { color = bestColor, tileId = t.id }
+end
+
 function Rules.resolveMove(state, color, move, rollFn)
   local rider = state.riders[color]
   assert(rider, "Rules.resolveMove: unknown rider " .. tostring(color))
 
-  -- 1. shift gear
-  local shift = clamp(move.shift or 0, -Config.gears.maxShift, Config.gears.maxShift)
-  local gear = clamp(rider.gear + shift, Config.gears.min, Config.gears.max)
+  -- 1. shift gear. An Overclock (first or second move) is always at the lowest gear.
+  local overclock, firstOverclock = false, false
+  if state.bonusMove == color then
+    overclock = true
+    state.bonusMove = false
+  elseif move.overclock and Riders.canOverclock(rider) then
+    overclock, firstOverclock = true, true
+    rider.charged = false
+  end
+  local gear
+  if overclock then
+    gear = Config.gears.min
+  else
+    gear = Rules.gearAfterShift(rider.gear, move.shift, Riders.maxShift(rider))
+  end
 
   -- 2. turn check: the curve die has numbered faces and one spin-out face
   local kind = move.kind
   local want = "straight"
   local shape = move.curve or "soft"
-  local roll, spunOut, wentStraight = nil, false, false
+  local roll, spunOut, wentStraight, boosted = nil, false, false, false
   if kind == "left" or kind == "right" then
     want = "curve"
     roll = rollFn(Config.turnCheck.die)
@@ -411,6 +457,9 @@ function Rules.resolveMove(state, color, move, rollFn)
       spunOut = true            -- curve happens, gear drops afterwards
     elseif roll >= gear then
       -- curve succeeds
+    elseif move.boost and Riders.canBoost(rider) then
+      boosted = true            -- Volt Vixen: the failed check curves anyway
+      rider.charged = false
     else
       kind = "straight"
       want = "straight"
@@ -433,8 +482,9 @@ function Rules.resolveMove(state, color, move, rollFn)
   local result = {
     gear = gear, tileGear = pieceGear, shape = pieceShape, substituted = substituted,
     removedTiles = removedTiles, roll = roll, spunOut = spunOut, wentStraight = wentStraight,
+    boosted = boosted, overclock = overclock, bonusMove = false,
     kind = kind, segs = segs, exitPose = exitPose,
-    scored = {}, stolen = {}, nudged = {}, spawned = {},
+    scored = {}, stolen = {}, nudged = {}, spawned = {}, gridlock = {},
   }
 
   -- 4. crash checks
@@ -456,6 +506,7 @@ function Rules.resolveMove(state, color, move, rollFn)
     local r = Rules.crash(state, color, crashReason, crashOwner, rollFn)
     r.segs, r.exitPose, r.kind, r.tileGear, r.shape = segs, exitPose, kind, pieceGear, pieceShape
     r.roll, r.spunOut, r.wentStraight = roll, spunOut, wentStraight
+    r.boosted, r.overclock, r.bonusMove = boosted, overclock, false
     r.substituted, r.removedTiles = substituted, removedTiles
     if victimRemoved then r.victim = { color = crashOwner, removedTiles = victimRemoved } end
     return r
@@ -486,6 +537,10 @@ function Rules.resolveMove(state, color, move, rollFn)
       end
       p.owner = color
       took[p.id] = true
+      if rider.ability == "gridlock" then
+        local hit = gridlockNearest(state, color, p)
+        if hit then result.gridlock[#result.gridlock + 1] = hit end
+      end
     end
   end
 
@@ -510,6 +565,12 @@ function Rules.resolveMove(state, color, move, rollFn)
       result.spawned[#result.spawned + 1] = np
     end
   end
+
+  -- 9. Overclock: the first move earns a second one, straight away
+  if firstOverclock then
+    state.bonusMove = color
+    result.bonusMove = true
+  end
   return result
 end
 
@@ -531,9 +592,10 @@ end
 
 -- Pass play to the next rider this round; after the last, start a new round (the order
 -- is re-sorted by gear and the tie-breaker moves on). Returns true if a new round began.
--- No-op once the game is won, or while a crashed rider still has to choose their gear.
+-- No-op once the game is won, while a crashed rider still has to choose their gear, or
+-- while an Overclocking rider still has their second move.
 function Rules.advanceTurn(state)
-  if state.winner or state.pendingGear then return false end
+  if state.winner or state.pendingGear or state.bonusMove then return false end
   if state.turn < #state.roundOrder then
     state.turn = state.turn + 1
     return false
@@ -554,12 +616,13 @@ function Rules.isValidState(state)
   if type(state.round) ~= "number" or type(state.tieBreaker) ~= "number" then return false end
   if type(state.riders) ~= "table" or type(state.prizms) ~= "table" then return false end
   if state.pendingGear and state.riders[state.pendingGear] == nil then return false end
+  if state.bonusMove and state.riders[state.bonusMove] == nil then return false end
   for _, c in ipairs(state.order) do
     local r = state.riders[c]
     if type(r) ~= "table" or type(r.pose) ~= "table" or type(r.trail) ~= "table"
       or type(r.trail.tiles) ~= "table" or type(r.trail.segs) ~= "table"
       or type(r.supply) ~= "table" or type(r.supply[1]) ~= "table"
-      or type(r.nextTileId) ~= "number" then
+      or type(r.nextTileId) ~= "number" or not Riders.isValid(r) then
       return false
     end
   end
@@ -567,8 +630,10 @@ function Rules.isValidState(state)
 end
 
 -- Gear the rider will be in after applying `shift` (clamped like resolveMove).
-function Rules.gearAfterShift(gear, shift)
-  local s = clamp(shift or 0, -Config.gears.maxShift, Config.gears.maxShift)
+-- maxShift: the rider's limit (Riders.maxShift); defaults to Config.gears.maxShift.
+function Rules.gearAfterShift(gear, shift, maxShift)
+  local m = maxShift or Config.gears.maxShift
+  local s = clamp(shift or 0, -m, m)
   return clamp(gear + s, Config.gears.min, Config.gears.max)
 end
 
@@ -582,15 +647,20 @@ function Rules.curveOdds(gear)
 end
 
 -- Hand mode: may `color` drop a physical tile of (gear, kind) at table position
--- pos = {x, z}? Returns true, shift on success; false, reason otherwise, where
--- reason is "over" | "pick" | "turn" | "gear" | "far".
-function Rules.validateTileDrop(state, color, gear, kind, pos, shape)
+-- pos = {x, z}? overclock: the rider is starting an Overclock (the tile must then be
+-- G1, as must the second move). Returns true, shift on success; false, reason
+-- otherwise, where reason is "over" | "pick" | "turn" | "gear" | "far".
+function Rules.validateTileDrop(state, color, gear, kind, pos, shape, overclock)
   if state.winner then return false, "over" end
   if state.pendingGear then return false, "pick" end
   if Rules.currentColor(state) ~= color then return false, "turn" end
   local rider = state.riders[color]
   local shift = gear - rider.gear
-  if math.abs(shift) > Config.gears.maxShift then return false, "gear" end
+  if state.bonusMove == color or (overclock and Riders.canOverclock(rider)) then
+    if gear ~= Config.gears.min then return false, "gear" end
+  elseif math.abs(shift) > Riders.maxShift(rider) then
+    return false, "gear"
+  end
   local center = Geom.tileCenter(kind, gear, rider.pose, shape)
   if Geom.distance(pos, center) > Config.snapRadius then return false, "far" end
   return true, shift

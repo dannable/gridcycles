@@ -113,4 +113,10 @@ Config = {
   placementMode = "commit", -- "commit" | "hand"
   snapRadius = 3.0,         -- hand mode: max distance from a tile's landing spot
   abilitiesEnabled = true,
+
+  -- Rider abilities (src/riders/riders.lua).
+  abilities = {
+    echoMaxShift = 2,       -- Echo may shift this many gears
+    gridlockReach = 1.0,    -- Gridlock removes a rival tile this close to a Prizm it takes
+  },
 }
