@@ -11,7 +11,7 @@
 --     roundOrder = { color... },      -- who plays this round, fastest gear first
 --     turn = n,                       -- index into roundOrder
 --     round = n, tieBreaker = n,      -- tieBreaker: index into order, rotates each round
---     riders  = { [color] = { gear, pose = {x,z,heading},
+--     riders  = { [color] = { gear, pose = {x,z,heading}, launch = Segment (the launch wall),
 --                             supply = { [gear] = { straight = n, soft = n, hard = n } },
 --                             nextTileId = n,
 --                             trail = { segs = {Segment...},   -- flat, each seg carries its tile id
@@ -34,6 +34,9 @@
 -- Prizm (within Config.prizm.onAxis of its axis) finishes crossing it with its next tile. You win with Config.prizmsToWin
 -- of your colour on the table at once. Contact on top of any Prizm never crashes.
 -- A rider's bike is part of their trail (Geom.bikeSeg), blocking everyone but its owner.
+-- So is their launch: a wall from the mat edge to where they started (the bike's
+-- footprint at launch). It stays after the bike moves on, blocks everyone (its owner
+-- too, once they've left it) and goes when they crash and relaunch.
 --
 -- Rules.resolveMove(state, color, move, rollFn) -> result
 --   move   = { shift = -1|0|1, kind = "straight"|"left"|"right", curve = "soft"|"hard",
@@ -49,8 +52,8 @@
 --              scored = { prizmId... }  (unscored Prizms you took),
 --              stolen = { { id, from = color } ... },
 --              nudged = { prizmId... }, spawned = { prizm... } (new unscored Prizms),
---              crashReason = "bounds"|"trail"|"bike"|"supply" (crash only), crashOwner = colour
---              whose trail/bike was hit (not for "bounds"), respawn = pose (crash only),
+--              crashReason = "bounds"|"trail"|"bike"|"launch"|"supply" (crash only), crashOwner =
+--              colour whose trail/bike/launch wall was hit (not for "bounds"), respawn = pose (crash only),
 --              victim = { color, removedTiles = { id... } } (crash into someone else's trail),
 --              boosted (Volt Vixen's charge saved a failed check), overclock (this move was
 --              an Overclock, first or second), bonusMove (the rider moves again now),
@@ -70,7 +73,7 @@ local function rand(rollFn)
   return (rollFn(10000) - 1) / 9999
 end
 
--- Everything a new path can crash into: every trail and every bike.
+-- Everything a new path can crash into: every trail, launch wall and bike.
 -- `exclude` names a rider whose own bike is left out (it never blocks its owner:
 -- the owner's next tile starts on the bike's nose).
 local function allTrails(state, exclude)
@@ -78,6 +81,7 @@ local function allTrails(state, exclude)
   for _, color in ipairs(state.order) do
     local r = state.riders[color]
     if r then list[#list + 1] = { owner = color, segs = r.trail.segs } end
+    if r and r.launch then list[#list + 1] = { owner = color, kind = "launch", segs = { r.launch } } end
   end
   for _, color in ipairs(state.order) do
     local r = state.riders[color]
@@ -130,6 +134,14 @@ local function randomLaunch(state, rollFn, exclude)
     if not Geom.pathHitsTrails({ Geom.bikeSeg(pose) }, allTrails(state, exclude), nil) then return pose end
   end
   return pose
+end
+
+-- Put a rider on a fresh random launch: pose plus the launch wall under the bike.
+local function launch(state, color, rollFn)
+  local rider = state.riders[color]
+  rider.launch = nil
+  rider.pose = randomLaunch(state, rollFn, color)
+  rider.launch = Geom.bikeSeg(rider.pose)
 end
 
 -- Is a Prizm segment clear of every wall and bike (by nudgeClear), every other
@@ -310,7 +322,7 @@ function Rules.newState(colors, rollFn)
       nextTileId = 1,
       trail = { segs = {}, tiles = {} },
     }
-    state.riders[c].pose = randomLaunch(state, rollFn, c)
+    launch(state, c, rollFn)
   end
   -- unscored Prizms: evenly spaced on a ring around the centre, random orientation
   local count = #state.order * Config.neutralPrizmsPerPlayer
@@ -337,7 +349,7 @@ function Rules.crash(state, color, reason, owner, rollFn)
   rider.trail = { segs = {}, tiles = {} }
   rider.supply = fullSupply()
   rider.gear = Config.gears.min
-  rider.pose = randomLaunch(state, rollFn, color)
+  launch(state, color, rollFn)
   Riders.onRespawn(rider)
   state.pendingGear = color
   state.bonusMove = false
@@ -354,7 +366,10 @@ local function isLocked(state, prizm)
   local touching = {}
   local n = 0
   for _, c in ipairs(state.order) do
-    local segs = state.riders[c].trail.segs
+    local r = state.riders[c]
+    local segs = {}
+    for i, sg in ipairs(r.trail.segs) do segs[i] = sg end
+    if r.launch then segs[#segs + 1] = r.launch end
     if #segs > 0 and Geom.pathDistance(segs, prizm) <= Config.prizm.touchDist then
       if prizm.owner == c then return true end
       touching[c] = true
@@ -497,7 +512,7 @@ function Rules.resolveMove(state, color, move, rollFn)
     local hit, trail, oldSeg = Geom.pathHitsTrails(segs, allTrails(state, color),
       { x = rider.pose.x, z = rider.pose.z }, passFn(state))
     if hit then
-      crashReason = trail.kind == "bike" and "bike" or "trail"
+      crashReason = (trail.kind == "bike" and "bike") or (trail.kind == "launch" and "launch") or "trail"
       crashOwner = trail.owner
       if crashReason == "trail" and trail.owner ~= color then hitTile = oldSeg.tile end
     end
@@ -642,7 +657,8 @@ function Rules.isValidState(state)
     if type(r) ~= "table" or type(r.pose) ~= "table" or type(r.trail) ~= "table"
       or type(r.trail.tiles) ~= "table" or type(r.trail.segs) ~= "table"
       or type(r.supply) ~= "table" or type(r.supply[1]) ~= "table"
-      or type(r.nextTileId) ~= "number" or not Riders.isValid(r) then
+      or type(r.nextTileId) ~= "number" or not Riders.isValid(r)
+      or (r.launch ~= nil and (type(r.launch) ~= "table" or type(r.launch.a) ~= "table")) then
       return false
     end
   end

@@ -229,6 +229,7 @@ local function describe(color, move, r)
   if r.outcome == "crash" then
     local why = r.crashReason
     if r.crashReason == "bike" then why = "hit " .. r.crashOwner .. "'s bike"
+    elseif r.crashReason == "launch" then why = "hit " .. r.crashOwner .. "'s launch wall"
     elseif r.crashReason == "supply" then why = "no tile available" end
     parts[#parts + 1] = "CRASH (" .. why .. "), respawning"
   end
@@ -267,6 +268,7 @@ local function apply(color, r)
   end
   if r.outcome == "crash" then
     Spawn.clearTrail(color)
+    Spawn.launch(color, State.riders[color].launch)
     Spawn.rider(color, r.respawn)
     return
   end

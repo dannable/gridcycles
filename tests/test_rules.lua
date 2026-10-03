@@ -970,3 +970,62 @@ describe("a Prizm you take slides to the front of the tile", function()
     assert_eq(#r.stolen, 0)
   end)
 end)
+
+describe("launch wall", function()
+  it("each rider starts on a launch wall from the mat edge to their bike's nose", function()
+    local st = Rules.newState({ "Red", "Blue" }, function(n) return math.random(n) end)
+    for _, c in ipairs(st.order) do
+      local r = st.riders[c]
+      local bike = Geom.bikeSeg(r.pose)
+      assert_near(r.launch.a.x, bike.a.x, 1e-9); assert_near(r.launch.a.z, bike.a.z, 1e-9)
+      assert_near(r.launch.b.x, r.pose.x, 1e-9); assert_near(r.launch.b.z, r.pose.z, 1e-9)
+    end
+  end)
+  it("the owner's first tile leaves it without crashing", function()
+    local st = newState()
+    st.riders.Red.launch = Geom.bikeSeg(st.riders.Red.pose)
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "placed")
+  end)
+  it("stays after the bike leaves: crossing it later is a crash, costing its owner nothing", function()
+    local st = newState()
+    st.riders.Red.launch = { a = { x = 0, z = -12 }, b = { x = 0, z = -10 } }
+    st.riders.Red.pose = { x = 5, z = 5, heading = 0 }
+    Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    local redTiles = #st.riders.Red.trail.tiles
+    st.riders.Blue.pose = { x = -1, z = -11, heading = 90 }
+    local r = Rules.resolveMove(st, "Blue", { kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "crash")
+    assert_eq(r.crashReason, "launch")
+    assert_eq(r.crashOwner, "Red")
+    assert_eq(r.victim, nil)
+    assert_eq(#st.riders.Red.trail.tiles, redTiles)
+    assert_true(st.riders.Red.launch ~= nil, "a rival's crash leaves it standing")
+  end)
+  it("blocks its owner too once they've left it", function()
+    local st = newState()
+    st.riders.Red.launch = { a = { x = 0, z = -12 }, b = { x = 0, z = -10 } }
+    st.riders.Red.pose = { x = -1, z = -11, heading = 90 }
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(r.crashReason, "launch")
+    assert_eq(r.crashOwner, "Red")
+  end)
+  it("a crash relaunches the rider on a new wall, and the old one goes", function()
+    local st = newState()
+    local old = { a = { x = 0, z = -12 }, b = { x = 0, z = -10 } }
+    st.riders.Red.launch = old
+    st.riders.Red.pose = { x = 0, z = Config.mat.depth / 2 - 0.5, heading = 0 }
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "crash")
+    local l = st.riders.Red.launch
+    assert_true(l ~= old)
+    assert_near(l.b.x, st.riders.Red.pose.x, 1e-9); assert_near(l.b.z, st.riders.Red.pose.z, 1e-9)
+  end)
+  it("saves without launch walls are still valid", function()
+    local st = newState()
+    st.riders.Red.launch, st.riders.Blue.launch = nil, nil
+    assert_true(Rules.isValidState(st))
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(r.outcome, "placed")
+  end)
+end)

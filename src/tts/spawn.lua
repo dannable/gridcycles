@@ -4,7 +4,7 @@
 -- laid along each stored 2D path segment. Game logic never reads these objects.
 --
 -- Every visual carries the tag "gc_visual" plus a group tag so it can be removed:
---   gc_mat, gc_rider_<Color>, gc_trail_<Color>, gc_prizm_<id>
+--   gc_mat, gc_rider_<Color>, gc_trail_<Color>, gc_launch_<Color>, gc_prizm_<id>
 
 Spawn = {}
 
@@ -207,6 +207,12 @@ function Spawn.rider(color, pose)
   }, Config.palette[color], "gc_rider_" .. color)
 end
 
+-- The rider's launch wall (replaced on every relaunch). nil: just clear it.
+function Spawn.launch(color, seg)
+  Spawn.clearGroup("gc_launch_" .. color)
+  if seg then Spawn.trailSegment(seg, color, "gc_launch_" .. color) end
+end
+
 function Spawn.clearTrail(color)
   Spawn.clearGroup("gc_trail_" .. color)
 end
@@ -324,6 +330,7 @@ function Spawn.rebuild(state)
       local segs = Geom.tilePath(tile.kind, tile.gear, tile.entry, tile.shape)
       Spawn.tile(color, segs, tile.gear, tile.shape, tile.id)
     end
+    Spawn.launch(color, r.launch)
     Spawn.rider(color, r.pose)
   end
   if Config.placementMode == "hand" then
