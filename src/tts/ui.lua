@@ -49,7 +49,7 @@ end
 
 local function lobbyXml()
   return [[
-<Panel id="gcLobby" active="true" width="440" height="404" rectAlignment="MiddleCenter"
+<Panel id="gcLobby" active="true" width="440" height="448" rectAlignment="MiddleCenter"
        color="#0A0618F2" padding="16 16 16 16">
   <VerticalLayout spacing="10">
     <Text fontSize="30" color="#05D9E8" alignment="MiddleCenter" fontStyle="Bold">GRIDCYCLES</Text>
@@ -69,6 +69,10 @@ local function lobbyXml()
     <HorizontalLayout spacing="8">
       <Text fontSize="18" color="#FFFFFF" alignment="MiddleLeft">Rider abilities</Text>
       <Button id="gcl_abilities" onClick="gcClick" color="#2A1B5C" textColor="#39FF14" preferredWidth="120">ON</Button>
+    </HorizontalLayout>
+    <HorizontalLayout spacing="8">
+      <Text fontSize="18" color="#FFFFFF" alignment="MiddleLeft">Table size</Text>
+      <Button id="gcl_table" onClick="gcClick" color="#2A1B5C" textColor="#39FF14" preferredWidth="120">Standard</Button>
     </HorizontalLayout>
     <HorizontalLayout spacing="8">
       <Text fontSize="18" color="#FFFFFF" alignment="MiddleLeft">Starting gear</Text>
@@ -227,6 +231,9 @@ function UI_.refresh()
   UI.setValue("gcl_prizms_val", tostring(s.prizmsToWin))
   UI.setValue("gcl_abilities", s.abilities and "ON" or "OFF")
   UI.setValue("gcl_blindstart", s.blindStart and "Blind pick" or "All G1")
+  local size = Config.tableSizes[s.tableSize or "standard"] or Config.tableSizes.standard
+  UI.setValue("gcl_table", string.format("%s%s %dx%d", string.upper(string.sub(s.tableSize or "standard", 1, 1)),
+    string.sub(s.tableSize or "standard", 2), size.mat.width, size.mat.depth))
   UI.setValue("gcl_mode", s.mode == "hand" and "Hand" or "Commit")
   UI.setValue("gcl_seats", "Sit in " .. table.concat(Config.seatOrder, ", ")
     .. ", then press start. First " .. s.maxPlayers .. " seated colours race.")

@@ -33,7 +33,8 @@ Name: **Gridcycles**. It's an original reskin inspired by *Lazer Ryderz* (Greate
 | Nudge | A tile that touches an unscored Prizm without scoring pushes it clear (one wall width from every wall). A Prizm is **locked** and never nudged if it sits on its owner's own line, or lines of two different colours touch it. |
 | Crash victim | If you crash into another rider's tile, they lose that tile and every tile older than it (their front tile always stays); the pieces return to their supply. Hitting a bike or your own wall costs nobody else anything. |
 | Turn order | Each round the fastest gear goes first. Ties go to whoever sits nearest, clockwise, to a tie-breaker marker that moves one seat on after every round. |
-| Riders | 4 original riders, each with one ability (see §6). |
+| Riders | 4 original riders, each with one ability (see §6). Having one of your Prizms stolen recharges a spent once-per ability. |
+| Table size | Lobby setting. Small: 28×28 mat, no gear 5. Standard: 36×36. Large: 44×44, and each rider gets one extra G5 straight. |
 
 Every number lives in a single `config.lua` (tile lengths, spin-out threshold, Prizms needed, mat size), so balancing never touches the logic code.
 
@@ -145,6 +146,8 @@ When the lobby's "Rider abilities" toggle is on, each rider is dealt a different
 - **Echo:** may shift up to 2 gears instead of 1 (also in hand mode).
 - **Overclock:** once per respawn (the launch counts), arm it to drop straight to G1 and take two moves in a row, both at G1. A crash recharges it.
 
+**Power Prizms:** when someone steals one of your Prizms, a spent Volt Vixen or Overclock charge comes back.
+
 These are balanced in playtesting (M8) and can be toggled off for a pure game.
 
 ## 7. Milestones
@@ -178,11 +181,10 @@ Team mode (2v2, allies can cross each other's trails), Prizm relay (carry a Priz
 
 ## 10. Rules backlog (from comparing with the tabletop game's published rules)
 
-Done: choosing your gear when you respawn; typed, limited pieces; substitution and oldest-tile removal; the curve die (spin-out face); crash victims lose pieces; Prizm scoring, stealing, pass-through, nudge and locking; the three-at-once win; unscored Prizms evenly spaced on a ring, replaced when scored; turn order by gear with a rotating tie-breaker; blind starting gear (matching picks stall to G1); the launch as a wall piece; scoring across two turns; a scored Prizm sliding to the front of its tile.
+Done (all items): choosing your gear when you respawn; typed, limited pieces; substitution and oldest-tile removal; the curve die (spin-out face); crash victims lose pieces; Prizm scoring, stealing, pass-through, nudge and locking; the three-at-once win; unscored Prizms evenly spaced on a ring, replaced when scored; turn order by gear with a rotating tie-breaker; blind starting gear (matching picks stall to G1); the launch as a wall piece; scoring across two turns; a scored Prizm sliding to the front of its tile.
 
 Kept different on purpose: start positions are a random edge point, not placed blind by hand.
 
-Not yet matching:
+Power Prizms are folded into the abilities: a stolen Prizm recharges a spent once-per ability (§6), rather than a second set of powers. Table sizes are a lobby setting (§2).
 
-1. **Power Prizms.** Per-rider one-shot powers, recharged when someone steals one of your Prizms. Overlaps with the M7 abilities: needs a decision on how they fit together.
-2. Table-size variants (small: no gear 5 / 4-soft / 3-hard; large: bonus G5 straight at launch). Needs a decision on mat sizes and what "bonus G5 straight at launch" should mean here.
+Nothing from the comparison is left open; new ideas go here.

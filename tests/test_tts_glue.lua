@@ -937,3 +937,40 @@ describe("Blind starting gear (stubbed)", function()
     assert_false(State.pickingStart)
   end)
 end)
+
+describe("Table size (stubbed)", function()
+  local host = { color = "Red", host = true }
+  it("the lobby button cycles small, standard, large", function()
+    Events.toLobby()
+    Events.settings.tableSize = "standard"
+    Events.lobbyClick(host, "table")
+    assert_eq(Events.settings.tableSize, "large")
+    assert_true(uiText.gcl_table:find("Large 44x44", 1, true) ~= nil, uiText.gcl_table)
+    Events.lobbyClick(host, "table")
+    assert_eq(Events.settings.tableSize, "small")
+    Events.lobbyClick(host, "table")
+    assert_eq(Events.settings.tableSize, "standard")
+    Events.lobbyClick({ color = "Blue", host = false }, "table")
+    assert_eq(Events.settings.tableSize, "standard", "host only")
+  end)
+  it("a small game spawns the small mat and drops gear 5 from panels and pickers", function()
+    Events.settings.tableSize = "small"
+    Events.settings.mode = "commit"
+    seated = { "Red", "Blue" }
+    Events.newGame()
+    local mat = getObjectsWithTag("gc_mat")[1]
+    assert_eq(mat.params.scale[1], 28)
+    assert_eq(State.settings.tableSize, "small")
+    assert_true(uiText.xml:find("gcb_Red_gear5", 1, true) == nil)
+    assert_true(uiText.gcSupply_Red:find("G5", 1, true) == nil)
+    -- save and load keeps the size
+    State = deepcopy(State)
+    Config.useTableSize("standard")
+    Events.restore()
+    assert_eq(Config.mat.width, 28)
+    Events.settings.tableSize = "standard"
+    Events.toLobby()
+    Events.newGame()
+    assert_eq(Config.mat.width, 36)
+  end)
+end)

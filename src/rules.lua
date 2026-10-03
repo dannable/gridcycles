@@ -187,11 +187,15 @@ local function randomPrizm(state, rollFn)
   return prizm
 end
 
+-- A rider's full set of pieces: Config.tileSupply for every gear in play, plus any
+-- bonus pieces from the table size (Config.supplyBonus).
 local function fullSupply()
   local sup = {}
+  local bonus = Config.supplyBonus or {}
   for g = Config.gears.min, Config.gears.max do
     sup[g] = {}
     for shape, n in pairs(Config.tileSupply[g] or {}) do sup[g][shape] = n end
+    for shape, n in pairs(bonus[g] or {}) do sup[g][shape] = (sup[g][shape] or 0) + n end
   end
   return sup
 end

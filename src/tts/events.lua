@@ -15,6 +15,7 @@ Events = {
     abilities = Config.abilitiesEnabled,
     mode = Config.placementMode,
     blindStart = Config.blindStartGear,
+    tableSize = Config.tableSize,
   },
 }
 
@@ -90,7 +91,10 @@ local function applySettings(s)
   Config.abilitiesEnabled = s.abilities
   Config.placementMode = s.mode
   Config.blindStartGear = s.blindStart == true   -- saves from before this setting started at G1
+  Config.useTableSize(s.tableSize or "standard")
 end
+
+local TABLE_SIZES = { "small", "standard", "large" }
 
 -- Forget the current rider's half-made choices (shift, armed abilities).
 local function resetPending()
@@ -119,7 +123,7 @@ function Events.newGame(colors)
   State.settings = {
     maxPlayers = Events.settings.maxPlayers, prizmsToWin = Events.settings.prizmsToWin,
     abilities = Events.settings.abilities, mode = Events.settings.mode,
-    blindStart = Events.settings.blindStart,
+    blindStart = Events.settings.blindStart, tableSize = Events.settings.tableSize,
   }
   UI_.clearLog()
   Spawn.rebuild(State)
@@ -149,6 +153,10 @@ function Events.lobbyClick(player, action)
   elseif action == "prizms_inc" then s.prizmsToWin = math.min(6, s.prizmsToWin + 1)
   elseif action == "abilities" then s.abilities = not s.abilities
   elseif action == "blindstart" then s.blindStart = not s.blindStart
+  elseif action == "table" then
+    local i = 1
+    for k, name in ipairs(TABLE_SIZES) do if name == s.tableSize then i = k end end
+    s.tableSize = TABLE_SIZES[i % #TABLE_SIZES + 1]
   elseif action == "mode" then
     s.mode = (s.mode == "hand") and "commit" or "hand"
   elseif action == "start" then
