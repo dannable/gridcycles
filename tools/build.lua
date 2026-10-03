@@ -8,7 +8,7 @@
 
 local function read(path)
   local f = assert(io.open(path, "rb"), "cannot open " .. path)
-  local s = f:read("a")
+  local s = f:read("*a")
   f:close()
   return s
 end

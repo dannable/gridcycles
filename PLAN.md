@@ -154,7 +154,7 @@ These are balanced in playtesting and can be toggled off for a pure game.
 | M3 ✅ | Multiplayer rules | Turn order, crashes and respawn, Prizm capture/respawn, win screen, save/load |
 | M4 ✅ | UI pass | Rider panels, lobby settings (mode, player count, abilities on/off, Prizm target), chat log |
 | M5 (code done, needs TTS playtest) | Hand mode | Drag-and-drop snapping and rejection |
-| M6 | Art | Final models and textures, mat, rider minis, rider cards, rules PDF |
+| M6 (in progress: bike model) | Art | Final models and textures, mat, rider minis, rider cards, rules PDF |
 | M7 | Abilities | 4 riders, toggleable |
 | M8 | Playtest & balance | 3+ sessions, tuning in `config.lua` |
 | M9 | Publish | Steam Cloud assets, Workshop page, thumbnail, description |

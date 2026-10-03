@@ -24,3 +24,7 @@ assets/source/
 # Third-party reference material: never publish (public repo)
 *.pdf
 reference/
+
+# Python bytecode
+__pycache__/
+*.pyc
