@@ -135,14 +135,16 @@ gridcycles/
 | Rider cards | 4 | Ability text |
 | Rules notebook | 1 | TTS Notebook tab plus a PDF |
 
-## 6. Original riders (draft)
+## 6. Original riders
 
-- **Volt Vixen:** once per game, ignore a failed turn check.
-- **Gridlock:** when you capture, you may delete one opponent tile that's adjacent to the Prizm.
-- **Echo:** may shift 2 gears instead of 1.
-- **Overclock:** once per respawn, take two moves in a row at G1.
+When the lobby's "Rider abilities" toggle is on, each rider is dealt a different one at random when the race starts (code: `src/riders/riders.lua`, numbers in `Config.abilities`).
 
-These are balanced in playtesting and can be toggled off for a pure game.
+- **Volt Vixen:** once per game, arm the boost before a curve. If the turn check fails, you curve anyway. The charge is only spent if it saved you; the spin-out face still spins you out.
+- **Gridlock:** each Prizm you take (scored or stolen) removes the nearest rival tile within reach of it, and the piece goes back to its owner. A rider's front tile (their bike sits on it) is never removed. Automatic.
+- **Echo:** may shift up to 2 gears instead of 1 (also in hand mode).
+- **Overclock:** once per respawn (the launch counts), arm it to drop straight to G1 and take two moves in a row, both at G1. A crash recharges it.
+
+These are balanced in playtesting (M8) and can be toggled off for a pure game.
 
 ## 7. Milestones
 
@@ -155,7 +157,7 @@ These are balanced in playtesting and can be toggled off for a pure game.
 | M4 ✅ | UI pass | Rider panels, lobby settings (mode, player count, abilities on/off, Prizm target), chat log |
 | M5 (code done, needs TTS playtest) | Hand mode | Drag-and-drop snapping and rejection |
 | M6 (in progress: bike model) | Art | Final models and textures, mat, rider minis, rider cards, rules PDF |
-| M7 | Abilities | 4 riders, toggleable |
+| M7 (code done, needs TTS playtest) | Abilities | 4 riders, toggleable |
 | M8 | Playtest & balance | 3+ sessions, tuning in `config.lua` |
 | M9 | Publish | Steam Cloud assets, Workshop page, thumbnail, description |
 
