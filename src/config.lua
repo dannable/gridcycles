@@ -53,8 +53,10 @@ Config = {
   -- nudges it away until it is nudgeClear from every wall.
   -- A line that ends within onAxis of the axis (on top of the Prizm, half its width)
   -- has not crossed yet; its next tile can finish the crossing.
+  -- A Prizm you take slides to the front of the tile that took it: across the line,
+  -- slideBack behind its end (more than onAxis, so your next tile can't take it again).
   prizm = { length = 1.5, endSlack = 0.175, passRadius = 0.4, touchDist = 0.33, nudgeClear = 0.55,
-            onAxis = 0.15 },
+            onAxis = 0.15, slideBack = 0.3 },
 
   -- The bike is part of its owner's trail: a segment this long ending at the trail
   -- end (nose on the exit of the last tile, tail back over it). Other riders crash

@@ -28,8 +28,9 @@
 -- limited supply of each (Config.tileSupply). See Rules.planPiece for what happens
 -- when the wanted piece has run out.
 --
--- Prizms: crossing an unscored Prizm scores it (it takes your colour and stays where it
--- is); crossing someone else's scored Prizm steals it. A line that stops on top of a
+-- Prizms: crossing an unscored Prizm scores it (it takes your colour and slides to the
+-- front of the tile that took it, across the line); crossing someone else's scored
+-- Prizm steals it (and it slides the same way). A line that stops on top of a
 -- Prizm (within Config.prizm.onAxis of its axis) finishes crossing it with its next tile. You win with Config.prizmsToWin
 -- of your colour on the table at once. Contact on top of any Prizm never crashes.
 -- A rider's bike is part of their trail (Geom.bikeSeg), blocking everyone but its owner.
@@ -547,6 +548,17 @@ function Rules.resolveMove(state, color, move, rollFn)
         local hit = gridlockNearest(state, color, p)
         if hit then result.gridlock[#result.gridlock + 1] = hit end
       end
+    end
+  end
+
+  -- 6b. every Prizm taken slides to the front of the tile, across the line
+  local k = 0
+  for _, p in ipairs(state.prizms) do
+    if took[p.id] then
+      k = k + 1
+      local at = Geom.advance(exitPose, -Config.prizm.slideBack * k)
+      local seg = newPrizmSeg(at.x, at.z, math.rad(exitPose.heading + 90))
+      p.a, p.b = seg.a, seg.b
     end
   end
 
