@@ -163,6 +163,40 @@ describe("Geom.pathCrossesPrizm", function()
   end)
 end)
 
+describe("Geom.pathCrossesPrizm across two tiles", function()
+  local prizm = seg(-1, 2, 1, 2)
+  local band = 0.15
+  it("a line ending on top of the Prizm (within the band) has not crossed yet", function()
+    assert_false(Geom.pathCrossesPrizm({ seg(0, 0, 0, 2.1) }, prizm, 0, band), "just past the axis")
+    assert_false(Geom.pathCrossesPrizm({ seg(0, 0, 0, 1.9) }, prizm, 0, band), "just short of it")
+    assert_true(Geom.pathCrossesPrizm({ seg(0, 0, 0, 2.1) }, prizm), "no band: past the axis counts")
+  end)
+  it("the next tile finishes the crossing", function()
+    local lead = { seg(0, 0, 0, 2.1) }
+    assert_true(Geom.pathCrossesPrizm({ seg(0, 2.1, 0, 4) }, prizm, 0, band, lead))
+    lead = { seg(0, 0, 0, 1.9) }
+    assert_true(Geom.pathCrossesPrizm({ seg(0, 1.9, 0, 4) }, prizm, 0, band, lead))
+  end)
+  it("without the lead-in, a tile starting on top of the Prizm does not cross it", function()
+    assert_false(Geom.pathCrossesPrizm({ seg(0, 2.1, 0, 4) }, prizm, 0, band))
+  end)
+  it("a crossing already completed on the lead-in does not count again", function()
+    local lead = { seg(0, 0, 0, 3) }
+    assert_false(Geom.pathCrossesPrizm({ seg(0, 3, 0, 5) }, prizm, 0, band, lead))
+  end)
+  it("backing off the Prizm the way it came is not a crossing", function()
+    local lead = { seg(0, 0, 0, 2.1) }
+    assert_false(Geom.pathCrossesPrizm({ seg(0, 2.1, 1.5, 1) }, prizm, 0, band, lead))
+  end)
+  it("a lead-in that does not join the new path is ignored", function()
+    local lead = { seg(5, 0, 5, 2.1) }
+    assert_false(Geom.pathCrossesPrizm({ seg(0, 2.1, 0, 4) }, prizm, 0, band, lead))
+  end)
+  it("a crossing through the band in one tile still counts", function()
+    assert_true(Geom.pathCrossesPrizm({ seg(0, 0, 0, 4) }, prizm, 0, band))
+  end)
+end)
+
 describe("Geom.inBounds", function()
   local mat = { width = 36, depth = 36 }
   it("path inside the mat is in bounds", function()

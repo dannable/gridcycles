@@ -29,7 +29,8 @@
 -- when the wanted piece has run out.
 --
 -- Prizms: crossing an unscored Prizm scores it (it takes your colour and stays where it
--- is); crossing someone else's scored Prizm steals it. You win with Config.prizmsToWin
+-- is); crossing someone else's scored Prizm steals it. A line that stops on top of a
+-- Prizm (within Config.prizm.onAxis of its axis) finishes crossing it with its next tile. You win with Config.prizmsToWin
 -- of your colour on the table at once. Contact on top of any Prizm never crashes.
 -- A rider's bike is part of their trail (Geom.bikeSeg), blocking everyone but its owner.
 --
@@ -512,6 +513,11 @@ function Rules.resolveMove(state, color, move, rollFn)
     return r
   end
 
+  -- the tile laid before this one: a line that stopped on top of a Prizm can finish
+  -- crossing it now
+  local front = rider.trail.tiles[#rider.trail.tiles]
+  local leadIn = front and tileSegs(front) or nil
+
   -- 5. place tile
   local entry = { x = rider.pose.x, z = rider.pose.z, heading = rider.pose.heading }
   local tile = {
@@ -529,7 +535,7 @@ function Rules.resolveMove(state, color, move, rollFn)
   -- 6. scoring: cross an unscored Prizm to take it, someone else's to steal it
   local took = {}
   for _, p in ipairs(state.prizms) do
-    if p.owner ~= color and Geom.pathCrossesPrizm(segs, p, Config.prizm.endSlack) then
+    if p.owner ~= color and Geom.pathCrossesPrizm(segs, p, Config.prizm.endSlack, Config.prizm.onAxis, leadIn) then
       if p.owner == nil then
         result.scored[#result.scored + 1] = p.id
       else
@@ -550,9 +556,11 @@ function Rules.resolveMove(state, color, move, rollFn)
     return result
   end
 
-  -- 7. a tile that touched an unscored, unlocked Prizm without taking it nudges it clear
+  -- 7. a tile that touched an unscored, unlocked Prizm without taking it nudges it clear,
+  -- unless the tile stopped on top of it (the next tile can finish crossing it)
   for _, p in ipairs(state.prizms) do
-    if not took[p.id] and Geom.pathDistance(segs, p) <= Config.prizm.touchDist and not isLocked(state, p) then
+    if not took[p.id] and Geom.pathDistance(segs, p) <= Config.prizm.touchDist and not isLocked(state, p)
+      and Geom.pointSegDist(exitPose, p) > Config.prizm.onAxis then
       if nudge(state, p, segs) then result.nudged[#result.nudged + 1] = p.id end
     end
   end

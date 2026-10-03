@@ -898,3 +898,37 @@ describe("respawn gear choice", function()
     assert_false(Rules.isValidState(st))
   end)
 end)
+
+describe("scoring across two turns", function()
+  -- Red's G1 straight runs from z = -10 to z = -8.
+  local function prizmAt(z, owner)
+    return { id = 1, owner = owner, a = { x = -1, z = z }, b = { x = 1, z = z } }
+  end
+  it("a tile ending on top of a Prizm doesn't score; the next tile finishes it", function()
+    for _, z in ipairs({ -8.1, -7.9 }) do
+      local st = newState({ prizmAt(z) })
+      local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+      assert_eq(#r.scored, 0, "stopped on top at z=" .. z)
+      assert_eq(#r.nudged, 0, "a Prizm you stop on is not nudged away")
+      assert_near(st.prizms[1].a.z, z, 1e-9)
+      r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+      assert_eq(#r.scored, 1, "finished at z=" .. z)
+    end
+  end)
+  it("a crossing finished last turn is not counted again (no re-steal)", function()
+    local st = newState({ prizmAt(-9) })
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(#r.scored, 1)
+    st.prizms[1].owner = "Blue"
+    r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(#r.stolen, 0)
+    assert_eq(st.prizms[1].owner, "Blue")
+  end)
+  it("after a crash there is no lead-in: a fresh line must cross on its own", function()
+    local st = newState({ prizmAt(-8.1) })
+    Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    st.riders.Red.trail = { segs = {}, tiles = {} }
+    local r = Rules.resolveMove(st, "Red", { kind = "straight" }, fixed(3))
+    assert_eq(#r.scored, 0)
+  end)
+end)
