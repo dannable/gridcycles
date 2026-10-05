@@ -856,3 +856,35 @@ describe("Hand mode with physical pieces (stubbed)", function()
     assert_eq(o.rot[2], 90)
   end)
 end)
+
+describe("Calibration script tools/lua/piece_test.lua", function()
+  it("runs in a context with no game globals and marks the exits Geom expects", function()
+    local f = assert(io.open("tools/lua/piece_test.lua", "r"))
+    local src = f:read("a"); f:close()
+    local printed, spawned, markers = {}, {}, {}
+    local env = {   -- only what TTS gives an execute-code script; NO Config, Geom, Spawn
+      math = math, string = string, ipairs = ipairs, pairs = pairs, print = function(m) printed[#printed + 1] = m end,
+      getObjectsWithTag = function() return {} end,
+      spawnObjectData = function(p) spawned[#spawned + 1] = p.data end,
+      spawnObject = function(p) markers[#markers + 1] = p.position end,
+    }
+    local chunk = assert(load(src, "piece_test", "t", env))
+    chunk()
+    assert_eq(#spawned, 4)
+    assert_eq(#markers, 4)
+    local cases = {
+      { "tile_g3_soft_right", "right", 3, "soft" }, { "tile_g3_soft_left", "left", 3, "soft" },
+      { "tile_g2_hard_right", "right", 2, "hard" }, { "tile_g2_straight", "straight", 2, "straight" },
+    }
+    for i, c in ipairs(cases) do
+      local d = spawned[i]
+      assert_eq(d.Nickname, c[1])
+      assert_eq(d.CustomMesh.MeshURL, Config.tts.pieceModels.base .. c[1] .. ".obj", "same URLs the game uses")
+      local entry = { x = d.Transform.posX, z = d.Transform.posZ, heading = d.Transform.rotY }
+      local _, exit = Geom.tilePath(c[2], c[3], entry, c[4])
+      assert_near(markers[i][1], exit.x, 1e-9, c[1] .. " exit x")
+      assert_near(markers[i][3], exit.z, 1e-9, c[1] .. " exit z")
+      assert_near(d.Transform.posY, Config.tts.tableY + Config.tts.matThickness, 1e-9)
+    end
+  end)
+end)
