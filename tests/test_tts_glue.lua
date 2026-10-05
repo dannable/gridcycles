@@ -555,6 +555,24 @@ describe("Physical tile pieces (stubbed)", function()
     end
     assert_true(io.open("assets/models/tiles/tiles_atlas.png", "r") ~= nil, "missing atlas")
   end)
+  it("meshes are pre-flipped for TTS, which mirrors OBJ x on import (right curves sit on -x in the file)", function()
+    local function xrange(name)
+      local lo, hi = math.huge, -math.huge
+      for line in io.lines("assets/models/tiles/" .. name .. ".obj") do
+        local x = line:match("^v ([%-%d%.eE]+) ")
+        if x then lo, hi = math.min(lo, tonumber(x)), math.max(hi, tonumber(x)) end
+      end
+      return lo, hi
+    end
+    local lo, hi = xrange("tile_g3_soft_right")
+    assert_true(hi < 0.5 and lo < -1, "soft right bends toward -x in the file")
+    lo, hi = xrange("tile_g3_soft_left")
+    assert_true(lo > -0.5 and hi > 1, "soft left bends toward +x in the file")
+    lo, hi = xrange("tile_g2_hard_right")
+    assert_true(hi < 0.5 and lo < -1, "hard right bends toward -x in the file")
+    lo, hi = xrange("tile_g3_straight")
+    assert_true(lo > -0.4 and hi < 0.4, "straights are symmetric about x = 0")
+  end)
   it("rebuild after load draws one piece per tile with the right mesh", function()
     Events.newGame()
     State.prizms = {}

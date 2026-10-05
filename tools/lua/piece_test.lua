@@ -13,7 +13,7 @@
 -- Self-contained on purpose: TTS runs this in its own context where Config and Geom (the game's
 -- globals) do not exist. The numbers below mirror src/config.lua; tests/test_tts_glue.lua checks
 -- that they still agree with Geom.
-local BASE = "https://raw.githubusercontent.com/dannable/gridcycles/v0.3-pieces/assets/models/tiles/"
+local BASE = "https://raw.githubusercontent.com/dannable/gridcycles/v0.4-pieces/assets/models/tiles/"
 local TAG = "gc_piece_test"
 local TABLE_Y = 1.0 + 0.1                       -- Config.tts.tableY + matThickness
 local STRAIGHT = { [2] = 3.0 }                  -- Config.tiles[gear].straight

@@ -16,6 +16,11 @@ soft/hard curve; mirrored meshes are generated, not negative-scaled). Convention
     plates on top showing the gear digit twice (once readable from each side of the
     table) and, on curves, a wave (soft) or bolt (hard) between them.
 Collision logic stays on the centreline paths in Geom; these meshes are visual only.
+
+TTS mirrors the x axis of every OBJ it imports (observed with tools/lua/piece_test.lua: curves
+bent the wrong way and the digits came out mirrored). So the files are written PRE-FLIPPED
+(x negated, triangle winding reversed, normals mirrored); TTS's flip then puts them right.
+Set TTS_FLIP_X = False to write the plain, un-flipped meshes (e.g. for other viewers).
 """
 import math
 import os
@@ -33,6 +38,7 @@ GAP = 0.03           # the tip stops this short of filling the next piece's notc
 BEVEL = 0.035        # top-edge chamfer
 ARC_STEPS = 8        # matches Config.arcSegments
 PLATE_LIFT = 0.004   # label plate floats this far above the top face
+TTS_FLIP_X = True    # write meshes pre-flipped for TTS's import (see docstring)
 CELL = 256           # atlas cell size; atlas is 4 x 4 cells
 
 
@@ -228,13 +234,16 @@ class Mesh:
     def write(self, path, header):
         with open(path, "w", newline="\n") as fh:
             fh.write("# %s\n" % header)
+            sx = -1.0 if TTS_FLIP_X else 1.0
             for p in self.v:
-                fh.write("v %.5f %.5f %.5f\n" % p)
+                fh.write("v %.5f %.5f %.5f\n" % (p[0] * sx, p[1], p[2]))
             for t in self.vt:
                 fh.write("vt %.5f %.5f\n" % t)
             for n in self.vn:
-                fh.write("vn %.5f %.5f %.5f\n" % n)
+                fh.write("vn %.5f %.5f %.5f\n" % (n[0] * sx, n[1], n[2]))
             for a, b, c in self.f:
+                if TTS_FLIP_X:
+                    b, c = c, b                      # mirroring reverses the winding
                 fh.write("f %d/%d/%d %d/%d/%d %d/%d/%d\n" % (a, a, a, b, b, b, c, c, c))
 
 

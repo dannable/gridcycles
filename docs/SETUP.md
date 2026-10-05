@@ -78,3 +78,5 @@ python3 tools/push_tts.py --exec tools/lua/piece_test.lua --logs
 ```
 
 It spawns one piece of each kind next to a white cube at the exit point the rules expect.
+TTS mirrors the x axis of imported OBJs, so `make_tiles.py` writes the meshes pre-flipped
+(`TTS_FLIP_X`); the test confirms curves bend the right way and digits read correctly.

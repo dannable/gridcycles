@@ -93,7 +93,7 @@ Config = {
     -- imports them mirrored (right curves bend left), set `mirror = true`. Run
     -- tools/lua/piece_test.lua in game to see which.
     pieceModels = {
-      base = "https://raw.githubusercontent.com/dannable/gridcycles/v0.3-pieces/assets/models/tiles/",
+      base = "https://raw.githubusercontent.com/dannable/gridcycles/v0.4-pieces/assets/models/tiles/",
       yaw = 0,
       mirror = false,
       yOffset = 0,
