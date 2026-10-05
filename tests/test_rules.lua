@@ -210,7 +210,7 @@ describe("Rules.resolveMove", function()
 
   it("a crash does not score Prizms on the failed path", function()
     local st = newState({ { id = 7, a = { x = -1, z = -9 }, b = { x = 1, z = -9 } } })
-    st.riders.Blue.trail.segs = { { a = { x = -3, z = -9.5 }, b = { x = 3, z = -9.5 } } }
+    st.riders.Blue.trail.segs = { { a = { x = -3, z = -9.8 }, b = { x = 3, z = -9.8 } } }   -- clear of the Prizm
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
     assert_eq(r.outcome, "crash")
     assert_eq(Rules.prizmCount(st, "Red"), 0)

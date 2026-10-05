@@ -233,12 +233,13 @@ local function apply(color, r)
   end
   if r.outcome == "crash" then
     Spawn.clearTrail(color)
-    Spawn.rider(color, r.respawn)
+    Spawn.rider(color, r.respawn, false)
     return
   end
   for _, id in ipairs(r.removedTiles or {}) do Spawn.removeTile(color, id) end
-  Spawn.tile(color, r.segs, r.tileGear, r.shape, State.riders[color].nextTileId - 1)
-  Spawn.rider(color, r.exitPose)
+  local tiles = State.riders[color].trail.tiles
+  Spawn.tile(color, tiles[#tiles])
+  Spawn.rider(color, r.exitPose, true)
   for _, id in ipairs(r.scored) do refreshPrizm(id) end
   for _, st in ipairs(r.stolen) do refreshPrizm(st.id) end
   for _, id in ipairs(r.nudged) do refreshPrizm(id) end
@@ -324,7 +325,13 @@ function Events.handleDrop(playerColor, obj)
     Spawn.returnTile(obj)
     return
   end
+  -- where the piece is: the middle of its bounds (its origin is the entry end, which
+  -- depends on where the player grabbed it)
   local p = obj.getPosition()
+  if obj.getBounds then
+    local b = obj.getBounds()
+    if b and b.center then p = b.center end
+  end
   local ok, v = Rules.validateTileDrop(State, owner, gear, kind, { x = p.x, z = p.z }, shape)
   Spawn.returnTile(obj)
   if not ok then

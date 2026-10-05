@@ -15,7 +15,7 @@ local function makeObj(params)
   function o.setName(n) o.name = n end
   function o.getName() return o.name end
   function o.getPosition() return { x = o.pos[1], y = o.pos[2], z = o.pos[3] } end
-  function o.setRotation() end
+  function o.setRotation(r) o.rot = r end
   function o.setPositionSmooth(p) o.pos = p; o.returned = (o.returned or 0) + 1 end
   function o.addTag(t) o.tags[t] = true end
   function o.createButton(b) o.button = b end
@@ -31,6 +31,8 @@ local dataSpawns = {}
 function spawnObjectData(params)
   dataSpawns[#dataSpawns + 1] = params.data
   local o = makeObj({ position = { params.data.Transform.posX, params.data.Transform.posY, params.data.Transform.posZ } })
+  o.name = params.data.Nickname or ""
+  o.data = params.data
   for _, tg in ipairs(params.data.Tags or {}) do o.addTag(tg) end
   if params.callback_function then params.callback_function(o) end
   return o
@@ -103,7 +105,7 @@ describe("TTS glue, solo (stubbed)", function()
     State.riders.Yellow.pose = { x = 0, z = 0, heading = 0 }
     State.prizms = {}
     Events.commitMove("Yellow", "straight")
-    assert_eq(count("gc_trail_Yellow"), 1 + 2, "wall segment + joint divider + gear plate")
+    assert_eq(count("gc_trail_Yellow"), 1, "one piece object per tile")
     assert_eq(count("gc_rider_Yellow"), 1)
   end)
 
@@ -481,26 +483,143 @@ describe("Seat enforcement (stubbed)", function()
   end)
 end)
 
-describe("Tile labels (stubbed)", function()
-  it("each laid tile gets a divider and a plate showing its gear", function()
+local function tileObjects(color)
+  local out = {}
+  for _, o in ipairs(getObjectsWithTag("gc_trail_" .. color)) do out[#out + 1] = o end
+  return out
+end
+
+describe("Physical tile pieces (stubbed)", function()
+  local base = Config.tts.pieceModels.base
+  it("each laid tile is ONE Custom_Model standing at its entry pose", function()
+    Events.settings.mode = "commit"
+    seated = { "Red" }
+    Events.newGame()
+    State.riders.Red.pose = { x = 3, z = 4, heading = 90 }
+    State.prizms = {}
+    Events.setShift("Red", 1)
+    Events.commitMove("Red", "straight")        -- G2 straight, entry (3, 4) heading 90
+    local objs = tileObjects("Red")
+    assert_eq(#objs, 1)
+    local d = objs[1].data
+    assert_eq(d.Name, "Custom_Model")
+    assert_eq(d.Nickname, "Red G2 Straight")
+    assert_eq(d.CustomMesh.MeshURL, base .. "tile_g2_straight.obj")
+    assert_eq(d.CustomMesh.DiffuseURL, base .. "tiles_atlas.png")
+    assert_eq(d.CustomMesh.ColliderURL, d.CustomMesh.MeshURL)
+    assert_near(d.Transform.posX, 3); assert_near(d.Transform.posZ, 4)
+    assert_near(d.Transform.posY, Config.tts.tableY + Config.tts.matThickness)
+    assert_eq(d.Transform.rotY, 90)
+    assert_eq(d.Transform.scaleX, 1)
+    assert_true(d.Locked)
+    assert_near(d.ColorDiffuse.r, Config.palette.Red[1])
+    local id = State.riders.Red.trail.tiles[1].id
+    assert_eq(#getObjectsWithTag("gc_tile_Red_" .. id), 1)
+  end)
+  it("curves use the mesh for their direction and shape", function()
+    local entry = { x = 0, z = 0, heading = 0 }
+    Spawn.tile("Red", { id = 91, kind = "right", shape = "soft", gear = 3, entry = entry })
+    Spawn.tile("Red", { id = 92, kind = "left", shape = "hard", gear = 2, entry = entry })
+    local n = {}
+    for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do n[o.name] = o.data.CustomMesh.MeshURL end
+    assert_eq(n["Red G3 Soft Right"], base .. "tile_g3_soft_right.obj")
+    assert_eq(n["Red G2 Hard Left"], base .. "tile_g2_hard_left.obj")
+  end)
+  it("pieceModels.mirror swaps the left and right meshes; yaw turns every piece", function()
+    local m = Config.tts.pieceModels
+    m.mirror, m.yaw = true, 180
+    Spawn.tile("Blue", { id = 1, kind = "right", shape = "soft", gear = 3, entry = { x = 0, z = 0, heading = 30 } })
+    Spawn.tile("Blue", { id = 2, kind = "straight", shape = "straight", gear = 1, entry = { x = 0, z = 0, heading = 30 } })
+    local o = getObjectsWithTag("gc_tile_Blue_1")[1]
+    assert_eq(o.data.CustomMesh.MeshURL, base .. "tile_g3_soft_left.obj")
+    assert_eq(o.data.Transform.rotY, 210)
+    assert_eq(getObjectsWithTag("gc_tile_Blue_2")[1].data.CustomMesh.MeshURL, base .. "tile_g1_straight.obj")
+    assert_eq(Spawn.pieceMeshName(2, "hard", "left"), "tile_g2_hard_right")
+    m.mirror, m.yaw = false, 0
+    assert_eq(Spawn.pieceMeshName(2, "hard", "left"), "tile_g2_hard_left")
+  end)
+  it("every piece type has a mesh file in assets/models/tiles", function()
+    local entries = {}
+    for g = 1, 5 do
+      for shape in pairs(Config.tileSupply[g]) do
+        for _, kind in ipairs(shape == "straight" and { "straight" } or { "left", "right" }) do
+          entries[#entries + 1] = Spawn.pieceMeshName(g, shape, kind)
+        end
+      end
+    end
+    assert_eq(#entries, 19)
+    for _, name in ipairs(entries) do
+      local f = io.open("assets/models/tiles/" .. name .. ".obj", "r")
+      assert_true(f ~= nil, "missing mesh " .. name)
+      f:close()
+    end
+    assert_true(io.open("assets/models/tiles/tiles_atlas.png", "r") ~= nil, "missing atlas")
+  end)
+  it("rebuild after load draws one piece per tile with the right mesh", function()
+    Events.newGame()
+    State.prizms = {}
+    State.riders.Red.pose = { x = 0, z = -14, heading = 0 }
+    Events.setShift("Red", 1)
+    Events.commitMove("Red", "straight")
+    Events.commitMove("Red", "right", "soft")
+    State = deepcopy(State)
+    Events.restore()
+    local tiles = State.riders.Red.trail.tiles
+    assert_eq(#tileObjects("Red"), #tiles)
+    for _, t in ipairs(tiles) do
+      local o = getObjectsWithTag("gc_tile_Red_" .. t.id)[1]
+      assert_eq(o.data.CustomMesh.MeshURL, base .. Spawn.pieceMeshName(t.gear, t.shape, t.kind) .. ".obj")
+    end
+  end)
+  it("the bike stands on the last tile, but on the mat right after a launch", function()
+    local top = Config.tts.tableY + Config.tts.matThickness
+    local rm = Config.tts.riderModel
+    local savedMesh, savedDiffuse = rm.mesh, rm.diffuse
+    rm.mesh, rm.diffuse = "http://x/bike.obj", "http://x/bike.png"
+    Events.newGame()
+    local bike = getObjectsWithTag("gc_rider_Red")[1]
+    assert_near(bike.data.Transform.posY, top + Config.tts.riderModel.yOffset, 1e-9, "on the mat at launch")
+    State.prizms = {}
+    Events.commitMove("Red", "straight")
+    bike = getObjectsWithTag("gc_rider_Red")[1]
+    assert_near(bike.data.Transform.posY, top + Config.tts.riderModel.yOffset + Config.tts.trailHeight, 1e-9,
+      "on top of the piece")
+    State = deepcopy(State)
+    Events.restore()
+    bike = getObjectsWithTag("gc_rider_Red")[1]
+    assert_near(bike.data.Transform.posY, top + Config.tts.riderModel.yOffset + Config.tts.trailHeight, 1e-9,
+      "after load too")
+    State.riders.Red.pose = { x = 0, z = Config.mat.depth / 2, heading = 0 }
+    Events.commitMove("Red", "straight")        -- crash: back on the mat
+    Events.chooseGear({ color = "Red", host = false }, 1)
+    bike = getObjectsWithTag("gc_rider_Red")[1]
+    assert_near(bike.data.Transform.posY, top + Config.tts.riderModel.yOffset, 1e-9, "respawn on the mat")
+    rm.mesh, rm.diffuse = savedMesh, savedDiffuse
+  end)
+end)
+
+describe("Grey-box fallback when no piece URL is set (stubbed)", function()
+  local m = Config.tts.pieceModels
+  local saved = m.base
+  it("lays wall blocks with a joint divider and a number plate", function()
+    m.base = ""
+    Events.settings.mode = "commit"
     seated = { "Red" }
     Events.newGame()
     State.riders.Red.pose = { x = 0, z = 0, heading = 0 }
     State.prizms = {}
     Events.setShift("Red", 1)
     Events.commitMove("Red", "straight")        -- G2 straight
-    local plate
+    local plate, found
     for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do
       if o.name == "Red G2 Straight" then plate = o end
+      if o.name == "Red tile joint" then found = true end
     end
     assert_true(plate ~= nil, "plate named by gear and shape")
     assert_eq(plate.button.label, "2")
     assert_eq(plate.button.click_function, "gcNoop")
-    local found = false
-    for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do
-      if o.name == "Red tile joint" then found = true end
-    end
     assert_true(found, "joint divider")
+    assert_eq(#tileObjects("Red"), 3)
   end)
   it("curve plates carry S or H after the gear", function()
     State.riders.Red.gear = 2
@@ -513,17 +632,7 @@ describe("Tile labels (stubbed)", function()
   end)
   it("walls are three times the old height", function()
     assert_near(Config.tts.trailHeight, 0.36)
-  end)
-  it("rebuild after load puts the right gear on each plate", function()
-    local saved = deepcopy(State)
-    State = saved
-    Events.restore()
-    local n = #State.riders.Red.trail.tiles
-    local plates = 0
-    for _, o in ipairs(getObjectsWithTag("gc_trail_Red")) do
-      if o.button then plates = plates + 1 end
-    end
-    assert_eq(plates, n)
+    m.base = saved
   end)
 end)
 
@@ -558,11 +667,11 @@ describe("Tile supply and removal (stubbed)", function()
     Events.commitMove("Red", "straight")
     Events.commitMove("Red", "straight")
     local firstId = State.riders.Red.trail.tiles[1].id
-    assert_eq(#getObjectsWithTag("gc_tile_Red_" .. firstId), 3)
+    assert_eq(#getObjectsWithTag("gc_tile_Red_" .. firstId), 1)
     Events.commitMove("Red", "straight")        -- third G1 straight: oldest tile comes off
-    assert_eq(#getObjectsWithTag("gc_tile_Red_" .. firstId), 0, "its wall, divider and plate are gone")
+    assert_eq(#getObjectsWithTag("gc_tile_Red_" .. firstId), 0, "its piece is gone")
     assert_eq(#State.riders.Red.trail.tiles, 2)
-    assert_eq(#getObjectsWithTag("gc_trail_Red"), 2 * 3)
+    assert_eq(#getObjectsWithTag("gc_trail_Red"), 2)
   end)
   it("the log says when a rider gave up tiles", function()
     local said = false
@@ -608,13 +717,13 @@ describe("Prizm stealing and victims on the table (stubbed)", function()
       Events.commitMove("Blue", "straight")
     end
     assert_eq(#State.riders.Blue.trail.tiles, 3)
-    assert_eq(#getObjectsWithTag("gc_tile_Blue_1"), 3)
+    assert_eq(#getObjectsWithTag("gc_tile_Blue_1"), 1)
     State.roundOrder, State.turn = { "Red", "Blue" }, 1
     State.riders.Red.gear = 3
     Events.commitMove("Red", "straight")
     assert_eq(#getObjectsWithTag("gc_tile_Blue_1"), 0, "oldest tile gone")
     assert_eq(#getObjectsWithTag("gc_tile_Blue_2"), 0, "the hit tile gone")
-    assert_eq(#getObjectsWithTag("gc_tile_Blue_3"), 3, "front tile stays")
+    assert_eq(#getObjectsWithTag("gc_tile_Blue_3"), 1, "front tile stays")
     assert_eq(#getObjectsWithTag("gc_trail_Red"), 0, "the crasher's line is cleared")
     local said = false
     for _, m in ipairs(broadcasts) do if m:find("Blue loses 2 tile", 1, true) then said = true end end
@@ -646,5 +755,104 @@ describe("Respawn gear picker (stubbed)", function()
     assert_true(Rules.isValidState(State))
     Events.restore()
     assert_eq(attrs["gcPick_Blue.active"], "true")
+  end)
+end)
+
+describe("Hand mode with physical pieces (stubbed)", function()
+  local function setup()
+    Events.settings.mode = "hand"
+    Events.settings.maxPlayers = 2
+    seated = { "Red", "Blue" }
+    Events.newGame()
+    State.prizms = {}
+  end
+  local function tile(color, label)
+    for _, o in ipairs(getObjectsWithTag("gc_tile")) do
+      if o.name == color .. " " .. label then return o end
+    end
+  end
+
+  it("tray pieces are draggable models of the right mesh, one per piece type", function()
+    setup()
+    local o = tile("Red", "G3 Soft Right")
+    assert_true(o ~= nil)
+    assert_eq(o.data.CustomMesh.MeshURL, Config.tts.pieceModels.base .. "tile_g3_soft_right.obj")
+    assert_false(o.data.Locked, "draggable")
+    assert_eq(o.data.Transform.rotY, 90, "lying along +x in the tray")
+    assert_eq(#getObjectsWithTag("gc_tile"), 2 * 19)
+  end)
+
+  it("the tray layout never overlaps pieces, and keeps them inside the tray", function()
+    local items, width, depth = Spawn.pieceLayout()
+    assert_eq(#items, 19)
+    local boxes = {}
+    for i, it in ipairs(items) do
+      local x0, x1, z0, z1 = Spawn.pieceBox(it.kind, it.gear, it.shape)
+      boxes[i] = { x0 = it.x + x0, x1 = it.x + x1, z0 = it.z + z0, z1 = it.z + z1 }
+      assert_true(boxes[i].x0 >= -width / 2 - 1e-9 and boxes[i].x1 <= width / 2 + 1e-9, "inside tray width")
+      assert_true(boxes[i].z1 <= 1e-9 and boxes[i].z0 >= -depth - 1e-9, "inside tray depth")
+    end
+    for i = 1, #boxes do
+      for j = i + 1, #boxes do
+        local a, b = boxes[i], boxes[j]
+        local overlap = a.x0 < b.x1 and b.x0 < a.x1 and a.z0 < b.z1 and b.z0 < a.z1
+        assert_false(overlap, "pieces " .. i .. " and " .. j .. " overlap")
+      end
+    end
+  end)
+
+  it("trays are clear of the mat and of each other, for 2 and for 4 riders", function()
+    for _, n in ipairs({ 2, 4 }) do
+      local colors = { "Red", "Blue", "Green", "Yellow" }
+      seated = {}
+      for i = 1, n do seated[i] = colors[i] end
+      Events.settings.maxPlayers = n
+      Events.settings.mode = "hand"
+      Events.newGame()
+      local boxes = {}
+      for i = 1, n do
+        local b = { x0 = math.huge, x1 = -math.huge, z0 = math.huge, z1 = -math.huge }
+        for _, o in ipairs(getObjectsWithTag("gc_tray_" .. colors[i])) do
+          b.x0, b.x1 = math.min(b.x0, o.pos[1]), math.max(b.x1, o.pos[1])
+          b.z0, b.z1 = math.min(b.z0, o.pos[3]), math.max(b.z1, o.pos[3])
+        end
+        assert_true(b.z1 < -Config.mat.depth / 2, "south of the mat")
+        boxes[i] = b
+      end
+      for i = 1, n do
+        for j = i + 1, n do
+          local a, b = boxes[i], boxes[j]
+          assert_false(a.x0 < b.x1 and b.x0 < a.x1 and a.z0 < b.z1 and b.z0 < a.z1, "trays " .. i .. "/" .. j)
+        end
+      end
+      if n == 4 then
+        assert_true(boxes[3].z1 < boxes[1].z0, "second band lies beyond the first")
+        local _, _, d = Spawn.pieceLayout()
+        assert_true(boxes[4].z0 > -(Config.mat.depth / 2 + Config.tts.trayOffset) - 2 * d - 4, "two bands, not four")
+      end
+    end
+    Events.settings.maxPlayers = 2
+    seated = { "Red", "Blue" }
+  end)
+
+  it("a dropped piece is judged by the middle of its bounds, not its grab point", function()
+    setup()
+    local r = State.riders.Red
+    r.pose = { x = 0, z = -10, heading = 0 }
+    local o = tile("Red", "G1 Straight")
+    local c = Geom.tileCenter("straight", 1, r.pose, "straight")
+    o.pos = { c.x + 25, 2, c.z }                                   -- origin far away...
+    o.getBounds = function() return { center = { x = c.x, y = 2, z = c.z } } end   -- ...but the piece sits right
+    Events.handleDrop("Red", o)
+    assert_eq(#State.riders.Red.trail.tiles, 1)
+    assert_eq(o.returned, 1)
+    o.getBounds = nil
+  end)
+
+  it("a returned piece goes back lying along +x", function()
+    local o = tile("Blue", "G2 Hard Left")
+    o.rot = nil
+    Spawn.returnTile(o)
+    assert_eq(o.rot[2], 90)
   end)
 end)

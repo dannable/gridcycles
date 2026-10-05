@@ -101,15 +101,72 @@ end
 local SHAPE_LABEL = { straight = "", soft = "S", hard = "H" }
 local SHAPE_NAME = { straight = "Straight", soft = "Soft", hard = "Hard" }
 
--- One laid tile: its wall segments, a pale divider bar across the wall at the joint
--- where it starts, and a plate on top showing its gear (plus S/H for a soft/hard
--- curve). The plate keeps a fixed orientation (not rotated with the trail) so the
--- digit reads the same everywhere. Every part is tagged gc_tile_<Color>_<id> so the
--- tile can be removed on its own when its owner gives up their oldest tiles.
-function Spawn.tile(color, segs, gear, shape, id)
+-- Physical pieces (Config.tts.pieceModels): one Custom_Model per tile, loaded from
+-- assets/models/tiles. The mesh's origin is the tile's entry point, so a piece is placed at
+-- its entry pose; the texture carries the gear digit, and the chevron tip / notch and the
+-- bevelled edge show where each tile starts. Empty `base` means grey-box blocks instead.
+local function useModels()
+  local m = Config.tts.pieceModels
+  return m ~= nil and m.base ~= nil and m.base ~= ""
+end
+
+local DIR_NAME = { left = "Left", right = "Right" }
+
+-- "Straight", "Soft Left", "Hard Right": the label used in object names and the tray.
+local function pieceLabel(kind, shape)
+  if shape == "straight" then return "Straight" end
+  return SHAPE_NAME[shape] .. " " .. DIR_NAME[kind]
+end
+
+-- Mesh file stem, e.g. tile_g3_soft_right. With pieceModels.mirror the left and right
+-- meshes are swapped (for a TTS import that mirrors them).
+function Spawn.pieceMeshName(gear, shape, kind)
+  if shape == "straight" then return "tile_g" .. gear .. "_straight" end
+  local dir = kind
+  if Config.tts.pieceModels.mirror then dir = (kind == "left") and "right" or "left" end
+  return "tile_g" .. gear .. "_" .. shape .. "_" .. dir
+end
+
+-- spawnObjectData table for a piece of this colour standing at `pos` (x, y, z) with the
+-- entry heading `heading`.
+local function pieceData(color, gear, kind, shape, pos, heading, locked, tags)
+  local m = Config.tts.pieceModels
+  local c = Config.palette[color]
+  local mesh = m.base .. Spawn.pieceMeshName(gear, shape, kind) .. ".obj"
+  return {
+    Name = "Custom_Model",
+    Nickname = color .. " G" .. tostring(gear) .. " " .. pieceLabel(kind, shape),
+    Transform = { posX = pos[1], posY = pos[2], posZ = pos[3], rotX = 0, rotY = heading + m.yaw, rotZ = 0,
+                  scaleX = 1, scaleY = 1, scaleZ = 1 },
+    ColorDiffuse = { r = c[1], g = c[2], b = c[3] },
+    Locked = locked,
+    Tags = tags,
+    CustomMesh = { MeshURL = mesh, DiffuseURL = m.base .. "tiles_atlas.png", ColliderURL = mesh,
+                   Convex = true, MaterialIndex = 0, TypeIndex = 0 },
+  }
+end
+
+-- One laid tile (a record from state: id, kind, shape, gear, entry). Every part is tagged
+-- gc_tile_<Color>_<id> so the tile can be removed on its own when its owner gives up their
+-- oldest tiles or is hit by a crash.
+function Spawn.tile(color, tile)
   local t = Config.tts
   local group = "gc_trail_" .. color
-  local tileTag = "gc_tile_" .. color .. "_" .. tostring(id)
+  local tileTag = "gc_tile_" .. color .. "_" .. tostring(tile.id)
+  if useModels() then
+    local e = tile.entry
+    local obj = spawnObjectData({
+      data = pieceData(color, tile.gear, tile.kind, tile.shape,
+        { e.x, t.tableY + t.matThickness + t.pieceModels.yOffset, e.z }, e.heading, true,
+        { VISUAL_TAG, group, tileTag }),
+      callback_function = function(o) o.interactable = false end,
+    })
+    register(obj, group)
+    register(obj, tileTag)
+    return
+  end
+  -- grey-box: a wall block per path segment, a pale divider at the joint, a number plate on top
+  local segs = Geom.tilePath(tile.kind, tile.gear, tile.entry, tile.shape)
   for _, s in ipairs(segs) do
     Spawn.trailSegment(s, color, group, tileTag)
   end
@@ -123,12 +180,12 @@ function Spawn.tile(color, segs, gear, shape, id)
   }, t.dividerColor, group, tileTag)
   local mid = Geom.segmentPose(segs[math.ceil(#segs / 2)])
   local plate = t.labelPlate
-  shape = shape or "straight"
+  local shape = tile.shape or "straight"
   place({
     position = { mid.x, top + 0.02, mid.z },
     scale = { plate, 0.04, plate },
-    name = color .. " G" .. tostring(gear) .. " " .. SHAPE_NAME[shape],
-    label = { text = tostring(gear) .. SHAPE_LABEL[shape], color = Config.palette[color] },
+    name = color .. " G" .. tostring(tile.gear) .. " " .. SHAPE_NAME[shape],
+    label = { text = tostring(tile.gear) .. SHAPE_LABEL[shape], color = Config.palette[color] },
   }, t.labelPlateColor, group, tileTag)
 end
 
@@ -158,7 +215,7 @@ end
 -- behind the pose.
 -- Custom bike mesh, spawned from a data table so tint/lock/tags are set up front
 -- (setCustomObject would respawn the object and drop them).
-local function customRider(color, pose)
+local function customRider(color, pose, lift)
   local t = Config.tts
   local mid = Geom.segmentPose(Geom.bikeSeg(pose))
   local m = t.riderModel
@@ -169,7 +226,7 @@ local function customRider(color, pose)
       Name = "Custom_Model",
       Nickname = color .. " rider",
       Transform = {
-        posX = mid.x, posY = t.tableY + t.matThickness + m.yOffset, posZ = mid.z,
+        posX = mid.x, posY = t.tableY + t.matThickness + m.yOffset + lift, posZ = mid.z,
         rotX = 0, rotY = pose.heading + m.yaw, rotZ = 0,
         scaleX = Config.bikeLength, scaleY = Config.bikeLength, scaleZ = Config.bikeLength,
       },
@@ -190,17 +247,20 @@ local function customRider(color, pose)
   register(obj, group)
 end
 
-function Spawn.rider(color, pose)
+-- `lifted`: the bike stands on a laid tile (so on top of it); false right after a launch,
+-- when it stands on the mat.
+function Spawn.rider(color, pose, lifted)
   local t = Config.tts
+  local lift = lifted and t.trailHeight or 0
   Spawn.clearGroup("gc_rider_" .. color)
   if t.riderModel and t.riderModel.mesh ~= "" then
-    customRider(color, pose)
+    customRider(color, pose, lift)
     return
   end
   local mid = Geom.segmentPose(Geom.bikeSeg(pose))
   place({
     type = t.riderType,
-    position = { mid.x, t.tableY + t.matThickness + t.riderSize / 2, mid.z },
+    position = { mid.x, t.tableY + t.matThickness + t.riderSize / 2 + lift, mid.z },
     rotation = { 0, pose.heading, 0 },
     scale = { t.riderSize, t.riderSize, t.riderSize },
     name = color .. " rider",
@@ -243,14 +303,6 @@ local function trayEntries()
   return list
 end
 
-local function trayRowZ(index)
-  return -(Config.mat.depth / 2 + Config.tts.trayOffset + (index - 1) * Config.tts.trayRowDepth)
-end
-
-local function slotX(slot, total)
-  return (slot - (total + 1) / 2) * Config.tts.trayGap
-end
-
 -- "Red G3 Soft Left" -> "Red", 3, "left", "soft"; "Red G2 Straight" -> "Red", 2, "straight", "straight"
 function Spawn.parseTileName(name)
   local color, gear, rest = tostring(name):match("^(%a+) G(%d) (.+)$")
@@ -261,20 +313,118 @@ function Spawn.parseTileName(name)
   return nil
 end
 
--- Slot position of a tray tile, derived from its name so no object ids are needed.
-local function homePos(color, gear, kind, shape, rowIndex)
+-- Grey-box tray (no piece models): one chord-sized block per tile in a single row ----------
+local function blockRowZ(index)
+  return -(Config.mat.depth / 2 + Config.tts.trayOffset + (index - 1) * Config.tts.trayRowDepth)
+end
+
+local function blockHome(gear, kind, shape, rowIndex)
   local t = Config.tts
   local entries = trayEntries()
   local slot = 1
   for i, e in ipairs(entries) do
     if e[1] == gear and e[2] == kind and e[3] == shape then slot = i end
   end
-  return { slotX(slot, #entries), t.tableY + t.matThickness + t.tileHeight / 2 + 0.05, trayRowZ(rowIndex) }
+  local x = (slot - (#entries + 1) / 2) * t.trayGap
+  return { x, t.tableY + t.matThickness + t.tileHeight / 2 + 0.05, blockRowZ(rowIndex) }
+end
+
+-- Piece tray: real pieces lying along +x (heading 90), one shelf per gear -----------------
+-- Box of a piece lying at heading 90 with its entry at the origin: x forward (including the
+-- chevron tip), z across (right curves bend toward -z, left toward +z).
+local function pieceBox(kind, gear, shape)
+  local w = Config.tts.trailWidth / 2
+  local minx, maxx, minz, maxz = 0, 0, 0, 0
+  for _, sg in ipairs(Geom.tilePath(kind, gear, { x = 0, z = 0, heading = 90 }, shape)) do
+    for _, p in ipairs({ sg.a, sg.b }) do
+      minx, maxx = math.min(minx, p.x), math.max(maxx, p.x)
+      minz, maxz = math.min(minz, p.z), math.max(maxz, p.z)
+    end
+  end
+  return minx, maxx + w, minz - w, maxz + w   -- the tip pokes a half-width past the exit
+end
+
+-- Layout of one rider's tray, relative to its north edge at x = 0: every item gets
+-- { gear, kind, shape, label, x, z } (the piece's entry point) and the tray's size.
+local function pieceLayout()
+  local pad = Config.tts.trayPad
+  local rows, totalW, depth = {}, 0, 0
+  for g = Config.gears.min, Config.gears.max do
+    local items, rowW, rowD = {}, 0, 0
+    for _, e in ipairs(trayEntries()) do
+      if e[1] == g then
+        local x0, x1, z0, z1 = pieceBox(e[2], g, e[3])
+        items[#items + 1] = { e = e, x0 = x0, w = x1 - x0, z1 = z1, d = z1 - z0 }
+        rowW = rowW + (x1 - x0) + (#items > 1 and pad or 0)
+        rowD = math.max(rowD, z1 - z0)
+      end
+    end
+    rows[#rows + 1] = { items = items, w = rowW, d = rowD }
+    totalW = math.max(totalW, rowW)
+    depth = depth + rowD + pad
+  end
+  local out, top = {}, -pad / 2
+  for _, row in ipairs(rows) do
+    local cursor = -row.w / 2
+    for _, it in ipairs(row.items) do
+      out[#out + 1] = { gear = it.e[1], kind = it.e[2], shape = it.e[3], label = it.e[4],
+                        x = cursor - it.x0, z = top - it.z1 }
+      cursor = cursor + it.w + pad
+    end
+    top = top - row.d - pad
+  end
+  return out, totalW + 2 * pad, depth
+end
+
+Spawn.pieceBox, Spawn.pieceLayout = pieceBox, pieceLayout   -- exposed for tests
+
+-- Trays go two to a band, side by side, bands stacking south of the mat. With a single
+-- rider the tray is centred. Returns the tray's x offset and its north edge z.
+local function trayOrigin(index, width, depth)
+  local riders = State and #State.order or 4
+  local band, col = math.floor((index - 1) / 2), (index - 1) % 2
+  local x = 0
+  if riders > 1 then x = (col == 0 and -1 or 1) * (width / 2 + 0.5) end
+  return x, -(Config.mat.depth / 2 + Config.tts.trayOffset) - band * (depth + 2)
+end
+
+-- Where a tray tile lives: position {x, y, z} and entry heading.
+local function homePos(gear, kind, shape, rowIndex)
+  local t = Config.tts
+  if not useModels() then
+    return blockHome(gear, kind, shape, rowIndex), 0
+  end
+  local items, width, depth = pieceLayout()
+  local x0, z0 = trayOrigin(rowIndex, width, depth)
+  for _, it in ipairs(items) do
+    if it.gear == gear and it.kind == kind and it.shape == shape then
+      return { x0 + it.x, t.tableY + t.matThickness - 0.04, z0 + it.z }, 90
+    end
+  end
+  return { x0, t.tableY + t.matThickness, z0 }, 90
 end
 
 function Spawn.trayTiles(color, index)
   local t = Config.tts
-  local z = trayRowZ(index)
+  if useModels() then
+    local items, width, depth = pieceLayout()
+    local x0, z0 = trayOrigin(index, width, depth)
+    place({
+      position = { x0, t.tableY + t.matThickness / 2 - 0.05, z0 - depth / 2 },
+      scale = { width, t.matThickness, depth },
+      name = color .. " tray",
+    }, t.matColor, "gc_tray_" .. color)
+    for _, it in ipairs(items) do
+      local pos, heading = homePos(it.gear, it.kind, it.shape, index)
+      local obj = spawnObjectData({
+        data = pieceData(color, it.gear, it.kind, it.shape, pos, heading, false,
+          { VISUAL_TAG, "gc_tray_" .. color, "gc_tile" }),
+      })
+      register(obj, "gc_tray_" .. color)
+    end
+    return
+  end
+  local z = blockRowZ(index)
   place({
     position = { 0, t.tableY + t.matThickness / 2 - 0.05, z },
     scale = { Config.mat.width, t.matThickness, t.trayRowDepth - 1 },
@@ -284,7 +434,7 @@ function Spawn.trayTiles(color, index)
     local g, kind, shape, label = e[1], e[2], e[3], e[4]
     local obj = spawnObject({
       type = t.blockType,
-      position = homePos(color, g, kind, shape, index),
+      position = blockHome(g, kind, shape, index),
       rotation = { 0, 0, 0 },
       scale = { t.tileWidth, t.tileHeight * (kind == "straight" and 1 or 2), Geom.tileChord(kind, g, shape) },
       sound = false,
@@ -308,8 +458,8 @@ function Spawn.returnTile(obj)
   local rowIndex
   for i, c in ipairs(State.order) do if c == color then rowIndex = i end end
   if rowIndex == nil then return end
-  local pos = homePos(color, gear, kind, shape, rowIndex)
-  obj.setRotation({ 0, 0, 0 })
+  local pos, heading = homePos(gear, kind, shape, rowIndex)
+  obj.setRotation({ 0, heading + (useModels() and Config.tts.pieceModels.yaw or 0), 0 })
   obj.setPositionSmooth(pos, false, true)
 end
 
@@ -320,11 +470,9 @@ function Spawn.rebuild(state)
   for _, color in ipairs(state.order) do
     local r = state.riders[color]
     for _, tile in ipairs(r.trail.tiles) do
-      -- tiles hold their entry pose + kind; segments are recomputed, not stored per tile
-      local segs = Geom.tilePath(tile.kind, tile.gear, tile.entry, tile.shape)
-      Spawn.tile(color, segs, tile.gear, tile.shape, tile.id)
+      Spawn.tile(color, tile)
     end
-    Spawn.rider(color, r.pose)
+    Spawn.rider(color, r.pose, #r.trail.tiles > 0)
   end
   if Config.placementMode == "hand" then
     for i, color in ipairs(state.order) do Spawn.trayTiles(color, i) end

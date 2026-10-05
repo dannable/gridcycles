@@ -51,7 +51,9 @@ Config = {
   -- Contact within passRadius of a Prizm never crashes (it is a gap in any wall). A
   -- tile that comes within touchDist of an unscored, unlocked Prizm without scoring
   -- nudges it away until it is nudgeClear from every wall.
-  prizm = { length = 1.5, endSlack = 0.175, passRadius = 0.4, touchDist = 0.33, nudgeClear = 0.55 },
+  -- These follow the piece width (tts.trailWidth = 0.6, half = 0.3): endSlack = half a piece,
+  -- touchDist = half a piece + half a Prizm (0.15), nudgeClear = touchDist + a 0.3 gap.
+  prizm = { length = 1.5, endSlack = 0.3, passRadius = 0.5, touchDist = 0.45, nudgeClear = 0.75 },
 
   -- The bike is part of its owner's trail: a segment this long ending at the trail
   -- end (nose on the exit of the last tile, tail back over it). Other riders crash
@@ -67,12 +69,12 @@ Config = {
   -- assumed to be 1x1x1 at scale 1. Verify in game and adjust.
   tts = {
     tableY = 1.0,           -- table surface height
-    trailWidth = 0.35,
+    trailWidth = 0.6,        -- piece width; keep equal to WIDTH in tools/make_tiles.py
     dividerColor = { 0.95, 0.95, 1.0 },  -- bar across the wall at each tile joint
     labelPlate = 0.8,        -- gear-number plate on top of each tile (size, world units)
     labelFontSize = 400,     -- gear number text; tune in game
     labelPlateColor = { 0.02, 0.01, 0.05 },
-    trailHeight = 0.36,      -- walls
+    trailHeight = 0.36,      -- piece height; keep equal to HEIGHT in tools/make_tiles.py
     prizmWidth = 0.3,
     prizmHeight = 0.6,
     markerSize = 0.8,
@@ -81,9 +83,21 @@ Config = {
     matColor = { 0.03, 0.02, 0.08 },
     tileWidth = 0.9,         -- hand-mode tray tiles
     tileHeight = 0.2,
-    trayGap = 1.85,          -- spacing between tray slots (x)
-    trayRowDepth = 8,        -- spacing between riders' tray rows (z)
+    trayGap = 1.85,          -- grey-box tray: spacing between slots (x)
+    trayRowDepth = 8,        -- grey-box tray: spacing between riders' tray rows (z)
     trayOffset = 6,          -- first tray row sits this far beyond the mat's south edge
+    trayPad = 0.5,           -- piece tray: gap between neighbouring pieces and between gear rows
+    -- Physical tile pieces (tools/make_tiles.py -> assets/models/tiles). One Custom_Model per
+    -- laid tile, with origin at the tile's entry point. Empty `base` falls back to grey-box
+    -- blocks (a thin block per path segment). If TTS imports them turned, set `yaw`; if it
+    -- imports them mirrored (right curves bend left), set `mirror = true`. Run
+    -- tools/lua/piece_test.lua in game to see which.
+    pieceModels = {
+      base = "https://raw.githubusercontent.com/dannable/gridcycles/v0.3-pieces/assets/models/tiles/",
+      yaw = 0,
+      mirror = false,
+      yOffset = 0,
+    },
     -- Custom rider mesh (assets/models/bike.obj + bike.png, uploaded somewhere public).
     -- Leave mesh empty to keep the grey-box triangle. The model is 1.0 long, nose +z,
     -- origin at bottom centre; in-game length is Config.bikeLength. Diffuse should be

@@ -5,7 +5,8 @@ Tabletop Simulator mod: neon light-cycle racing, an original reskin inspired by 
 
 ## Current status
 
-- **M0-M4 done and playtested. M5 code written (hand mode: tray tiles, onObjectDrop snap/reject), awaiting David's playtest.** Next: M6 art (needs David: Blender/Steam Cloud assets). Known: mat 36x36 overhangs the default hex table; use Options > Table > None.
+- **M0-M4 done and playtested; rules brought in line with the published tabletop rules since (typed limited pieces, substitution/removal, crash victims, Prizm stealing/pass-through/nudge, gear turn order, respawn gear choice).** Tiles are now physical piece meshes (`tools/make_tiles.py` -> `assets/models/tiles`, pinned by tag in `Config.tts.pieceModels.base`). **Not yet confirmed in TTS:** piece handedness (run `tools/lua/piece_test.lua`; `pieceModels.mirror` / `yaw` fix a bad import), hand-mode trays, bike height on pieces.
+- Remaining rule gaps are listed in PLAN.md section 10. Next art step is M6 (mat, rider cards). Known: mat 36x36 overhangs the default hex table; use Options > Table > None.
 - Track milestone progress by ticking the table in PLAN.md section 7 as milestones complete.
 
 ## Commands
