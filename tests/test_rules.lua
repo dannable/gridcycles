@@ -29,10 +29,25 @@ describe("Rules.newState", function()
       assert_eq(r.gear, 1)
       assert_eq(Rules.prizmCount(st, c), 0)
       local hw, hd = Config.mat.width / 2, Config.mat.depth / 2
-      local tail = Geom.bikeSeg(r.pose).a   -- bike tail starts on the edge
-      assert_true(math.abs(math.abs(tail.x) - hw) < 1e-6 or math.abs(math.abs(tail.z) - hd) < 1e-6,
-        "bike tail on edge")
-      assert_true(Geom.inBounds({ { a = r.pose, b = r.pose } }, Config.mat), "nose inside mat")
+      -- the launch pose is ON the edge, so the first tile starts against it
+      assert_true(math.abs(math.abs(r.pose.x) - hw) < 1e-6 or math.abs(math.abs(r.pose.z) - hd) < 1e-6,
+        "launch pose on the edge")
+      -- and the bike stands just ahead of it, on the mat
+      assert_true(Geom.inBounds({ Geom.bikeSeg(r.pose, true) }, Config.mat), "launch bike inside the mat")
+    end
+  end)
+  it("the first tile starts on the mat edge, however the rider launched", function()
+    for seed = 1, 40 do
+      math.randomseed(seed)
+      local st = Rules.newState({ "Red", "Blue" }, function(n) return math.random(n) end)
+      local hw, hd = Config.mat.width / 2, Config.mat.depth / 2
+      local r = st.riders.Red
+      local r0 = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, function(n) return math.random(n) end)
+      if r0.outcome == "placed" then
+        local e = r.trail.tiles[1].entry
+        assert_true(math.abs(math.abs(e.x) - hw) < 1e-6 or math.abs(math.abs(e.z) - hd) < 1e-6,
+          "first tile entry is on the edge")
+      end
     end
   end)
   it("starts with one unscored Prizm per rider, evenly spaced on a ring round the centre", function()
@@ -424,38 +439,35 @@ describe("Rules.validateTileDrop", function()
 end)
 
 describe("bike as part of the trail", function()
-  -- Red at (0,-10) heading +z; bike lies along z in [-11.8, -10]. Blue heads -x
-  -- across it from the east.
-  it("an opponent's tile crossing a bike crashes with reason bike", function()
+  -- Red at (0,-10) heading +z with no tile yet: the bike stands just ahead of the launch point,
+  -- z in [-10, -8.2]. Blue heads -x across it from the east.
+  it("an opponent's tile crossing a launch bike crashes with reason bike", function()
     local st = newState()
-    st.riders.Blue.pose = { x = 3, z = -10.5, heading = 270 }   -- G2 straight is 3 long: x 3 -> 0
+    st.riders.Blue.pose = { x = 3, z = -9, heading = 270 }      -- G2 straight is 3 long: x 3 -> 0
     local r = Rules.resolveMove(st, "Blue", { shift = 1, kind = "straight" }, fixed(3))
     assert_eq(r.outcome, "crash")
     assert_eq(r.crashReason, "bike")
     assert_eq(r.crashOwner, "Red")
   end)
-  it("the bike blocks only others: the owner's own tile starts on its nose", function()
+  it("the bike blocks only others: the owner's own first tile starts at the launch point", function()
     local st = newState()
     local r = Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))
     assert_eq(r.outcome, "placed")
   end)
-  it("the bike follows the trail end: after a move it sits on the new tile's end", function()
+  it("the bike follows the trail end: after a move it rides the new tile, not the launch spot", function()
     local st = newState()
-    Rules.resolveMove(st, "Red", { shift = 0, kind = "straight" }, fixed(3))   -- G1: z -10 -> -8
-    -- old bike spot (z -11.8..-10) is now open; new bike covers z -9.8..-8
-    st.riders.Blue.pose = { x = 3, z = -10.5, heading = 270 }
+    st.riders.Red.gear = 3
+    -- a hard left (G3, radius 2, 90 degrees) swings Red away from the launch bike's spot
+    Rules.resolveMove(st, "Red", { shift = 0, kind = "left", curve = "hard" }, fixed(5))
+    assert_eq(#st.riders.Red.trail.tiles, 1)
+    st.riders.Blue.pose = { x = 3, z = -9, heading = 270 }      -- the move that crashed into the launch bike
     local ok = Rules.resolveMove(st, "Blue", { shift = 1, kind = "straight" }, fixed(3))
-    assert_eq(ok.outcome, "placed", "old bike position no longer blocks")
-    local st2 = newState()
-    Rules.resolveMove(st2, "Red", { shift = 0, kind = "straight" }, fixed(3))
-    st2.riders.Blue.pose = { x = 3, z = -9, heading = 270 }
-    local hit = Rules.resolveMove(st2, "Blue", { shift = 1, kind = "straight" }, fixed(3))
-    assert_eq(hit.outcome, "crash", "new bike spot blocks (it lies over the tile, so reported as trail)")
+    assert_eq(ok.outcome, "placed", "the launch spot no longer blocks")
   end)
   it("a trail hit still reports reason trail", function()
     local st = newState()
     Rules.resolveMove(st, "Red", { shift = 1, kind = "straight" }, fixed(3))   -- G2: z -10 -> -7
-    st.riders.Blue.pose = { x = 3, z = -8.5, heading = 270 }   -- crosses z=-8.5, mid-tile, clear of the bike
+    st.riders.Blue.pose = { x = 3, z = -8.5, heading = 270 }   -- crosses z=-8.5, mid-tile
     local r = Rules.resolveMove(st, "Blue", { shift = 1, kind = "straight" }, fixed(3))
     assert_eq(r.crashReason, "trail")
     assert_eq(r.crashOwner, "Red")
@@ -467,16 +479,16 @@ describe("bike as part of the trail", function()
       for i, a in ipairs(st.order) do
         for j, b in ipairs(st.order) do
           if i < j then
-            assert_false(Geom.segmentsIntersect(Geom.bikeSeg(st.riders[a].pose), Geom.bikeSeg(st.riders[b].pose)),
+            assert_false(Geom.segmentsIntersect(Geom.bikeSeg(st.riders[a].pose, true), Geom.bikeSeg(st.riders[b].pose, true)),
               "bikes overlap at launch")
           end
         end
       end
     end
   end)
-  it("a crash respawns the bike clear of the others", function()
+  it("a crash clears the crasher's line", function()
     local st = newState()
-    st.riders.Blue.pose = { x = 3, z = -10.5, heading = 270 }
+    st.riders.Blue.pose = { x = 3, z = -9, heading = 270 }
     local r = Rules.resolveMove(st, "Blue", { shift = 1, kind = "straight" }, fixed(3))
     assert_eq(r.outcome, "crash")
     assert_eq(#st.riders.Blue.trail.segs, 0)
@@ -769,7 +781,7 @@ describe("crash victims lose pieces", function()
   end)
   it("hitting a bike or your own trail costs nobody else anything", function()
     local st = newState()
-    local r = redCrossesAt(st, 11)                -- Blue's bike, no tiles laid
+    local r = redCrossesAt(st, 9)                 -- Blue's launch bike (z 10 -> 8.2), no tiles laid
     assert_eq(r.crashReason, "bike")
     assert_eq(r.victim, nil)
     st = newState()

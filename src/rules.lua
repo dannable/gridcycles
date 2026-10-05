@@ -29,7 +29,8 @@
 -- Prizms: crossing an unscored Prizm scores it (it takes your colour and stays where it
 -- is); crossing someone else's scored Prizm steals it. You win with Config.prizmsToWin
 -- of your colour on the table at once. Contact on top of any Prizm never crashes.
--- A rider's bike is part of their trail (Geom.bikeSeg), blocking everyone but its owner.
+-- A rider's bike is part of their trail (Geom.bikeSeg): on the last tile once a line is laid,
+-- just ahead of the launch point before that. It blocks everyone but its owner.
 --
 -- Rules.resolveMove(state, color, move, rollFn) -> result
 --   move   = { shift = -1|0|1, kind = "straight"|"left"|"right", curve = "soft"|"hard" }
@@ -72,7 +73,7 @@ local function allTrails(state, exclude)
   for _, color in ipairs(state.order) do
     local r = state.riders[color]
     if r and r.pose and color ~= exclude then
-      list[#list + 1] = { owner = color, kind = "bike", segs = { Geom.bikeSeg(r.pose) } }
+      list[#list + 1] = { owner = color, kind = "bike", segs = { Geom.bikeSeg(r.pose, #r.trail.tiles == 0) } }
     end
   end
   return list
@@ -96,9 +97,9 @@ function Rules.prizmCount(state, color)
   return n
 end
 
--- Random edge launch, heading inward, with the bike's tail on the edge (so the
--- pose, the bike's nose, sits bikeLength inside). Retries if the bike would
--- land on a trail or another bike.
+-- Random edge launch, heading inward. The pose is on the mat edge, so the first tile starts
+-- against it; the bike stands just ahead of the pose (Geom.bikeSeg). Retries if that
+-- bike would land on a trail or another bike.
 local function randomLaunch(state, rollFn, exclude)
   local mat = Config.mat
   local hw, hd = mat.width / 2, mat.depth / 2
@@ -116,8 +117,7 @@ local function randomLaunch(state, rollFn, exclude)
     else                    -- east edge, heading -x
       pose = { x = hw, z = -hd + m + t * (mat.depth - 2 * m), heading = 270 }
     end
-    pose = Geom.advance(pose, Config.bikeLength)
-    if not Geom.pathHitsTrails({ Geom.bikeSeg(pose) }, allTrails(state, exclude), nil) then return pose end
+    if not Geom.pathHitsTrails({ Geom.bikeSeg(pose, true) }, allTrails(state, exclude), nil) then return pose end
   end
   return pose
 end

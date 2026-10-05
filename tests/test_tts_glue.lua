@@ -437,19 +437,24 @@ describe("Custom rider mesh (stubbed)", function()
     Events.toLobby()
     local m = Config.tts.riderModel
     m.mesh, m.diffuse, m.yaw = "http://x/bike.obj", "http://x/bike.png", 180
-    Spawn.rider("Red", { x = 3, z = 4, heading = 90 })
+    Spawn.rider("Red", { x = 3, z = 4, heading = 90 }, true)
     local d = dataSpawns[#dataSpawns]
     assert_eq(d.Name, "Custom_Model")
     assert_eq(d.CustomMesh.MeshURL, "http://x/bike.obj")
     assert_eq(d.CustomMesh.ColliderURL, "http://x/bike.obj")
     assert_eq(d.Transform.rotY, 270)
     assert_eq(d.Transform.scaleX, Config.bikeLength)
-    -- model is centred half a bike length behind the pose (heading 90 = +x)
+    -- on a laid tile the model is centred half a bike length behind the pose (heading 90 = +x)
     assert_near(d.Transform.posX, 3 - Config.bikeLength / 2)
+    assert_near(d.Transform.posZ, 4)
+    -- at a launch (nothing laid yet) it stands just ahead of the pose instead
+    Spawn.rider("Red", { x = 3, z = 4, heading = 90 }, false)
+    d = dataSpawns[#dataSpawns]
+    assert_near(d.Transform.posX, 3 + Config.bikeLength / 2)
     assert_near(d.Transform.posZ, 4)
     assert_near(d.ColorDiffuse.r, Config.palette.Red[1])
     assert_eq(count("gc_rider_Red"), 1)
-    Spawn.rider("Red", { x = 3, z = 4, heading = 0 })
+    Spawn.rider("Red", { x = 3, z = 4, heading = 0 }, true)
     assert_eq(count("gc_rider_Red"), 1, "old rider replaced")
     m.mesh, m.diffuse, m.yaw = "", "", 0
   end)

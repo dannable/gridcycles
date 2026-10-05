@@ -210,14 +210,14 @@ function Spawn.removePrizm(id)
   Spawn.clearGroup("gc_prizm_" .. id)
 end
 
--- The bike is part of its owner's trail: it sits on the end of the last tile with
--- its nose on `pose` (see Geom.bikeSeg), so the model is centred half a bike length
--- behind the pose.
+-- The bike is part of its owner's trail (see Geom.bikeSeg): it stands on the last tile with
+-- its nose on `pose`, so the model is centred half a bike length behind the pose; before
+-- any tile is laid it stands just ahead of the launch point.
 -- Custom bike mesh, spawned from a data table so tint/lock/tags are set up front
 -- (setCustomObject would respawn the object and drop them).
 local function customRider(color, pose, lift)
   local t = Config.tts
-  local mid = Geom.segmentPose(Geom.bikeSeg(pose))
+  local mid = Geom.segmentPose(Geom.bikeSeg(pose, lift == 0))
   local m = t.riderModel
   local group = "gc_rider_" .. color
   local c = Config.palette[color]
@@ -257,7 +257,7 @@ function Spawn.rider(color, pose, lifted)
     customRider(color, pose, lift)
     return
   end
-  local mid = Geom.segmentPose(Geom.bikeSeg(pose))
+  local mid = Geom.segmentPose(Geom.bikeSeg(pose, not lifted))
   place({
     type = t.riderType,
     position = { mid.x, t.tableY + t.matThickness + t.riderSize / 2 + lift, mid.z },

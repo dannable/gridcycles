@@ -257,9 +257,16 @@ function Geom.advance(pose, d)
   return { x = pose.x + math.sin(h) * d, z = pose.z + math.cos(h) * d, heading = pose.heading }
 end
 
--- The bike's footprint: a segment from its tail to its nose, where the nose sits
--- on `pose` (the trail end) and the tail lies back along the last tile.
-function Geom.bikeSeg(pose)
+-- The bike's footprint, a segment of Config.bikeLength. On a laid line the bike rides on
+-- the last tile: its nose is on `pose` (the trail end) and its tail lies back along that
+-- tile. At a launch (`launching`: no tile laid yet) there is nothing behind the pose, and the
+-- first tile must start at the mat edge, so the bike stands just ahead of the pose instead,
+-- tail on `pose`.
+function Geom.bikeSeg(pose, launching)
+  if launching then
+    local nose = Geom.advance(pose, Config.bikeLength)
+    return { a = { x = pose.x, z = pose.z }, b = { x = nose.x, z = nose.z } }
+  end
   local tail = Geom.advance(pose, -Config.bikeLength)
   return { a = { x = tail.x, z = tail.z }, b = { x = pose.x, z = pose.z } }
 end

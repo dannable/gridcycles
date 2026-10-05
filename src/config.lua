@@ -57,8 +57,8 @@ Config = {
 
   -- The bike is part of its owner's trail: a segment this long ending at the trail
   -- end (nose on the exit of the last tile, tail back over it). Other riders crash
-  -- into it. It is also the in-game length of the bike model. A fresh launch puts
-  -- the tail on the mat edge.
+  -- into it. It is also the in-game length of the bike model. At a launch (no tile laid
+  -- yet) it stands just ahead of the launch point, which is on the mat edge.
   bikeLength = 1.8,
 
   launchMargin = 6,         -- keep launch points this far from mat corners
