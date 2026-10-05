@@ -6,6 +6,8 @@ Flattens `#include name` lines in src/Global.lua exactly like tools/build.lua.
 Stdlib only. Run from anywhere:   python3 tools/push_tts.py [--host 127.0.0.1] [--logs]
 
 --logs  stay connected afterwards and print TTS chat/log/error messages (Ctrl+C to quit).
+--exec FILE  don't reload the table; run FILE as Lua inside the running game (Global context,
+        so Config / Geom / Spawn exist if Gridcycles is loaded). print() shows with --logs.
 Load a game in TTS first. Save & Play reloads the table with the new scripts.
 """
 import argparse, json, os, re, socket, sys
@@ -13,6 +15,7 @@ import argparse, json, os, re, socket, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEND_PORT, RECV_PORT = 39999, 39998
 MSG_SAVE_AND_PLAY = 1
+MSG_EXECUTE = 3
 IN_PRINT, IN_ERROR = 2, 3
 
 
@@ -52,11 +55,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--logs", action="store_true")
+    ap.add_argument("--exec", metavar="FILE", help="run this Lua file in the running game instead of Save & Play")
     args = ap.parse_args()
 
-    script = flatten("Global", set())
-    payload = {"messageID": MSG_SAVE_AND_PLAY,
-               "scriptStates": [{"guid": "-1", "script": script, "ui": read("ui/Global.xml")}]}
+    if args.exec:
+        with open(args.exec, "r", encoding="utf-8") as f:
+            script = f.read()
+        payload = {"messageID": MSG_EXECUTE, "guid": "-1", "script": script}
+    else:
+        script = flatten("Global", set())
+        payload = {"messageID": MSG_SAVE_AND_PLAY,
+                   "scriptStates": [{"guid": "-1", "script": script, "ui": read("ui/Global.xml")}]}
 
     srv = listen(args.host) if args.logs else None
     try:
@@ -64,7 +73,8 @@ def main():
             s.sendall(json.dumps(payload).encode("utf-8"))
     except OSError as e:
         sys.exit("Cannot reach TTS on %s:%d (%s). Is TTS running with a game loaded?" % (args.host, SEND_PORT, e))
-    print("pushed Global.lua (%d bytes) to TTS" % len(script))
+    print(("executed %s (%d bytes) in TTS" % (args.exec, len(script))) if args.exec
+          else ("pushed Global.lua (%d bytes) to TTS" % len(script)))
 
     if srv:
         print("listening for TTS output... (Ctrl+C to quit)")

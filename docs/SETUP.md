@@ -65,3 +65,16 @@ python3 tools/push_tts.py --logs               # same, then stream TTS chat/erro
 
 It talks to TTS's External Editor API on localhost:39999 (replies on 39998), so TTS must be running with a game loaded. Linux saves live in `~/.local/share/Tabletop Simulator/Saves/`.
 `prep_bike.py` on Linux: `python3 tools/prep_bike.py` (needs numpy, pillow).
+
+## Physical tile meshes (prototype, not wired in yet)
+
+`python3 tools/make_tiles.py` (needs `pip install pillow` and `lua`) writes one OBJ per piece type
+plus a shared texture atlas to `assets/models/tiles/`. Origin = the piece's entry point, so place
+with position = entry, rotationY = entry heading, scale 1. To check how TTS imports them (axis
+handedness, mirrored curves), with the game running:
+
+```bash
+python3 tools/push_tts.py --exec tools/lua/piece_test.lua --logs
+```
+
+It spawns one piece of each kind next to a white cube at the exit point the rules expect.
